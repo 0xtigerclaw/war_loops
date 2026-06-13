@@ -193,4 +193,3 @@ fidelity across **layout · visual · content · completeness** and emits concre
 instructions. Those feed the next `pencil --in ... --out ...` pass. It iterates until the score
 clears the bar or stops improving, and every iteration is recorded, so fidelity is measurable and
 regressions are caught.
-
