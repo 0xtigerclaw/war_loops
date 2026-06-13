@@ -121,6 +121,26 @@ flowchart TB
 War Loops wraps *each* stage in a judge-gated repair loop, so a stage cannot advance until its
 output is verified: a thin spec never reaches the build, and an unfaithful build never reaches you.
 
+## Memory
+
+War Loops treats memory as a first-class part of the architecture, not an afterthought. Different
+loops need different memory horizons, so the system layers four kinds, all backed by Convex (the
+shared, real-time store) plus the model's own context window.
+
+| Type | Where it lives | Horizon | What it holds |
+|------|----------------|---------|---------------|
+| **Short-term** | model context window + `tasks` (handoff, outputs) | one turn / one run | the verified spec handed from Pixel to Wireframe, the previous stage's output, and the current findings fed into the next repair pass |
+| **Episodic** | `evaluations` (plus task `outputs`) | the whole run | every iteration's score, gates, and findings: the replayable episode of a mirror build, used to drive repairs and to benchmark fidelity over time |
+| **Shared** | `tasks` plus `agents` / `activity` (Convex, live) | cross-agent, real-time | the blackboard every agent and the dashboard read and write; the live activity stream powers coordination and lets you follow along |
+| **Long-term** | `memories` (embeddings / retrieval) | cross-run, persistent | approved designs and reusable token/layout patterns, retrieved on future tasks so the system improves with use |
+
+How memory maps onto the loop stack:
+
+- **Short-term** is the working set of a single loop: tokens accumulate in the context window (loop ①), tool results feed back within a turn (loop ②), and the spec handoff carries state from one stage to the next (loop ④).
+- **Episodic** is what makes the verify loop (loop ③) and the benchmark loop (loop ⑤) work: each judge verdict and repair is recorded, so the next repair can reference the last attempt and fidelity is measurable across runs.
+- **Shared** memory is the spine: because every agent writes to Convex, they coordinate through one common ground truth and the dashboard reflects state live.
+- **Long-term** memory closes the outer loop: approved results are embedded and retrieved, so patterns learned on one page inform the next.
+
 ## How it works
 
 | Stage | What it does | Gate / loop |
