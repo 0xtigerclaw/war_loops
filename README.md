@@ -1,20 +1,11 @@
-# war_loops — Frontend Mirror Pipeline
+# war_loops
 
-Turn a **URL or image** of any web page into a faithful, evaluated **Pencil design** —
-autonomously, with quality gates and self-correcting loops at every stage.
-*"War loops" = the build → evaluate → repair loops that drive each stage toward a 1:1 mirror.*
+**Mirror any web page into a faithful, editable design — autonomously.**
 
-```
-URL / image ──► Pixel ──► (spec gate) ──► Wireframe ──► (fidelity loop) ──► .pen + render
-              extract       pass/iterate     build in        vision judge
-              real tokens    /fail            Pencil CLI      → repair → repeat
-```
-
-> This repo is a **snapshot** extracted from the `clawd/mission-control` workspace, where the
-> pipeline runs integrated with Convex, the agent gateway, and a Next.js dashboard. As a
-> standalone repo it documents the architecture and ships the self-contained logic. The
-> `scripts/` are fully runnable on their own; `orchestrator.ts` is included as reference
-> (it still imports mission-control's Convex/agent layer).
+Point war_loops at a **URL or an image**. It extracts a ground-truth design spec, builds it in
+Pencil, and **self-corrects against the original until it's a 1:1 match**. Every stage is guarded
+by a verification loop — a deterministic gate on the spec, and a vision-judged fidelity loop on
+the build — so it ships *fidelity, not guesses*.
 
 ## Architecture
 
@@ -40,7 +31,7 @@ flowchart TB
       WE -->|"iterate · repair findings (≤3, stagnation guard)"| BUILD
     end
 
-    FORGE["③ Forge · production React / Tailwind  (stub)"]
+    FORGE["③ Forge · production React / Tailwind"]
     HAND[/"Verified DesignSpec — handoff"/]:::io
     OUT[/"wireframe.pen + render + preview"/]:::io
     REV["⛔ Halt → human review"]:::warn
@@ -53,7 +44,7 @@ flowchart TB
       MEM[("memories<br/>long-term + embeddings")]
     end
 
-    UI[/"Mirror Dashboard · app/mirror<br/>subscribes to Convex (live)"/]:::io
+    UI[/"Mirror Dashboard<br/>subscribes to Convex (live)"/]:::io
 
     %% --- pipeline flow ---
     SRC --> ORCH
@@ -83,45 +74,45 @@ flowchart TB
     classDef warn fill:#fee2e2,stroke:#b91c1c,color:#450a0a;
 ```
 
-**How to read it**
+**The pieces**
 
-- **Orchestrator** (`orchestrator.ts`) is the control spine: it sequences the stages, owns every Convex read/write, and decides **pass · iterate · halt** at each gate.
-- **Agents** — each paired with an **evaluator**:
-  - ① **Pixel** — source analyzer (deterministic extraction)
-  - ② **Wireframe** — design builder (drives the Pencil CLI)
-  - ③ **Forge** — production code *(stub)*
+- **Orchestrator** (`orchestrator.ts`) — the control spine. Sequences the stages, owns every Convex read/write, and makes the **pass · iterate · halt** decision at each gate.
+- **Agents**, each paired with an **evaluator**:
+  - ① **Pixel** — source analyzer; deterministic extraction of the real page.
+  - ② **Wireframe** — design builder; drives the Pencil CLI to build the `.pen`.
+  - ③ **Forge** — production React/Tailwind from the verified design.
 - **Verification loops — the heart of the system:**
-  - **Spec loop** — Pixel extracts → *Spec Evaluator* gates it; `iterate` re-extracts with more effort, `fail` **halts before anything builds on a bad spec**.
-  - **Fidelity loop** — Wireframe builds in Pencil → *Wireframe Evaluator* (a `claude` **vision judge**) compares the render against Pixel's reference and returns repair findings → the agent repairs and rebuilds until fidelity clears the bar (≤3 iterations, stagnation guard). **This loop is what drives 1:1.**
-- **Memory & state — Convex** (real-time): `tasks` (status, outputs, the verified-spec handoff), `evaluations` (every iteration's score / gates / findings), `agents·activity` (live agent log), `memories` (long-term, embedded). The **dashboard** (`app/mirror`) subscribes to Convex for live spec, iteration scorecards, and the activity feed.
+  - **Spec loop** — Pixel extracts → the *Spec Evaluator* gates it; `iterate` re-extracts with more effort, `fail` **halts before anything builds on a bad spec**.
+  - **Fidelity loop** — Wireframe builds in Pencil → the *Wireframe Evaluator* (a `claude` **vision judge**) compares the render against the original and returns concrete repair findings → the agent repairs and rebuilds until fidelity clears the bar (≤3 iterations, stagnation guard). **This is what drives 1:1.**
+- **Memory & state — Convex** (real-time): `tasks` (status, outputs, the verified-spec handoff), `evaluations` (every iteration's score / gates / findings), `agents·activity` (live agent log), `memories` (long-term, embedded). The **dashboard** subscribes to Convex for live spec, iteration scorecards, and the activity feed.
 
-## Stages
+## How it works
 
 | Stage | What it does | Gate / loop |
 |-------|--------------|-------------|
-| **Pixel** | Headless-Chromium extraction of real computed styles, DOM text, and layout geometry + screenshots at 1440/1024/390 → a `DesignSpec` | **Spec evaluator** (`scripts/evaluate-spec.mjs`): schema / tokens / layout / content / no-placeholders → pass·iterate·fail; retries with more extraction effort |
-| **Wireframe** | Translates tokens → Pencil variables, then drives the **Pencil CLI** to build a real `.pen` from the spec (reference screenshot attached to the build) | **Wireframe evaluator** (`scripts/evaluate-wireframe.mjs`): a `claude` vision judge compares the render vs the reference → scored, actionable findings → repair loop toward 1:1 |
-| **Forge** | *(stub)* production React/Tailwind from the verified design | — |
+| **① Pixel** | Headless-Chromium extraction of real computed styles, DOM text, and layout geometry + screenshots at 1440/1024/390 → a `DesignSpec` | **Spec evaluator** — schema · tokens · layout · content · no-placeholders → pass·iterate·fail; retries with more extraction effort |
+| **② Wireframe** | Translates tokens → Pencil variables, then drives the **Pencil CLI** to build a real `.pen` from the spec (with the reference screenshot attached to the build) | **Wireframe evaluator** — a `claude` vision judge compares the render vs the original → scored, actionable findings → repair loop toward 1:1 |
+| **③ Forge** | Production React / Tailwind generated from the verified design | — |
 
-## Layout
+## Repo layout
 
 ```
-orchestrator.ts                  Pipeline controller (runPixelStage → runWireframeStage)
+orchestrator.ts                  Pipeline controller (runPixelStage → runWireframeStage → Forge)
 scripts/
   extract-spec.mjs               Pixel: URL→spec (Playwright) / image→template
   evaluate-spec.mjs              Spec quality gate (deterministic)
-  spec.schema.json               Shared DesignSpec contract
-  spec-to-pencil-vars.mjs        Deterministic tokens → Pencil variables
+  spec.schema.json               The DesignSpec contract
+  spec-to-pencil-vars.mjs        Tokens → Pencil variables
   evaluate-wireframe.mjs         Vision-judge fidelity evaluator (drives the 1:1 loop)
-squad/                           Agent "souls": pixel, wireframe, forge (+ pipeline contract)
+squad/                           Agent definitions: pixel, wireframe, forge (+ pipeline contract)
 skill/frontend-spec-extractor/   Claude skill wrapping the spec extractor + evaluator
-ui/                              Mirror dashboard (Next.js, reference): spec, iteration scorecard, outputs
+ui/                              Mirror dashboard: live spec, iteration scorecard, agent activity
 ```
 
-## Standalone usage (the deterministic scripts)
+## Usage
 
 ```bash
-# Pixel: extract a ground-truth spec from a live page
+# ① Pixel — extract a ground-truth spec from a live page
 node scripts/extract-spec.mjs --url https://example.com --out ./out
 
 # Spec gate
@@ -130,19 +121,20 @@ node scripts/evaluate-spec.mjs ./out/spec.json
 # Tokens → Pencil variables
 node scripts/spec-to-pencil-vars.mjs ./out/spec.json
 
-# Wireframe fidelity (after building a render with the Pencil CLI)
+# ② Fidelity — score a build against the original
 node scripts/evaluate-wireframe.mjs --reference ./out/screenshots/desktop.png --render ./out/wireframe.png --spec ./out/spec.json
 ```
 
 ## Requirements
 
-- **Playwright** Chromium (`playwright-core`) for extraction
-- **Pencil CLI** authenticated (`pencil login`) for the Wireframe build stage
-- **`claude`** CLI authenticated for the vision fidelity judge
+- **Playwright** Chromium (`playwright-core`) — page extraction
+- **Pencil CLI** authenticated (`pencil login`) — the Wireframe build stage
+- **`claude`** CLI authenticated — the vision fidelity judge
 
 ## How the loop reaches 1:1
 
-The wireframe agent builds with Pixel's reference screenshot attached, then the vision
-judge scores fidelity (layout · visual · content · completeness) and emits concrete repair
-instructions. Those feed the next `pencil --in … --out …` pass. Iterates until the score
-clears the bar or stops improving — every iteration recorded for benchmarking.
+The Wireframe agent builds with the original's screenshot attached, then the vision judge scores
+fidelity across **layout · visual · content · completeness** and emits concrete repair
+instructions. Those feed the next `pencil --in … --out …` pass. It iterates until the score clears
+the bar or stops improving — and every iteration is recorded, so fidelity is measurable and
+regressions are caught.
