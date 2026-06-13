@@ -86,6 +86,41 @@ flowchart TB
   - **Fidelity loop** — Wireframe builds in Pencil → the *Wireframe Evaluator* (a `claude` **vision judge**) compares the render against the original and returns concrete repair findings → the agent repairs and rebuilds until fidelity clears the bar (≤3 iterations, stagnation guard). **This is what drives 1:1.**
 - **Memory & state — Convex** (real-time): `tasks` (status, outputs, the verified-spec handoff), `evaluations` (every iteration's score / gates / findings), `agents·activity` (live agent log), `memories` (long-term, embedded). The **dashboard** subscribes to Convex for live spec, iteration scorecards, and the activity feed.
 
+## The loop stack — loops all the way down
+
+war_loops is **recursive by design**: every loop wraps the one beneath it, adds a *judge*, and
+only exits when that judge is satisfied. A token loop produces a tool turn; tool turns produce a
+build; a judge bounces the build back until it's faithful; the pipeline chains judged stages; and
+a benchmark loop tunes the whole machine over time. The nesting *is* the architecture.
+
+```mermaid
+flowchart TB
+  subgraph L5["⑤ Benchmark loop · score &amp; tune · exit: none · ∞"]
+    subgraph L4["④ Pipeline · Pixel → Wireframe → Forge · exit: 1:1 deliverable or review · ~hours"]
+      subgraph L3["③ Verify loop · build · judge · repair · exit: gate passes / stagnation · ~minutes"]
+        subgraph L2["② Tool turn · call tool · feed result · exit: no more tool calls · ~seconds–min"]
+          subgraph L1["① Token loop · sample · append · repeat · exit: stop token · ~seconds"]
+            TOK["the · cat · sat · ▮"]:::tok
+          end
+        end
+      end
+    end
+  end
+  classDef tok fill:#fff7ed,stroke:#c2410c,color:#7c2d12;
+```
+
+| # | Loop | Each cycle | Judge / exit | Timescale | In war_loops |
+|---|------|-----------|--------------|-----------|--------------|
+| ① | **Token loop** | sample → append → repeat | stop token | ~seconds | the substrate of every agent + judge call |
+| ② | **Tool turn** | call tool → feed result | no more tool calls | ~seconds–min | Pencil `batch_design`/`get_screenshot`; Playwright extraction steps |
+| ③ | **Verify loop** ⭐ | build/extract → **judge** → repair | gate passes (spec valid · fidelity ≥ bar) **or** stagnation | ~minutes | the **spec gate** *and* the **vision-judged fidelity loop** |
+| ④ | **Pipeline** | Pixel → Wireframe → Forge, each a verify loop, handed off | 1:1 deliverable, or halt → human review | ~min–hours | the **orchestrator** |
+| ⑤ | **Benchmark loop** | run many targets → score fidelity → tune gates/prompts | none — continuous improvement | ∞ | "eval on our UI" — measurable fidelity over time |
+
+⭐ **Level ③ is war_loops' signature.** Most pipelines stop at level ④ (chain the stages and hope).
+war_loops wraps *each* stage in a judge-gated repair loop, so a stage cannot advance until its
+output is verified — a thin spec never reaches the build, and an unfaithful build never reaches you.
+
 ## How it works
 
 | Stage | What it does | Gate / loop |
