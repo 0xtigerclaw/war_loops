@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mirror/design-spec",
+  "title": "Frontend Mirror DesignSpec",
+  "description": "Ground-truth design specification produced by the Pixel source analyzer. Shared contract between the spec extractor, the spec evaluator, and warloops/orchestrator.ts (DesignSpec interface).",
+  "type": "object",
+  "required": ["source_type", "source_ref", "viewports", "layout", "tokens", "content", "interactions"],
+  "additionalProperties": true,
+  "properties": {
+    "source_type": { "type": "string", "enum": ["url", "image"] },
+    "source_ref": { "type": "string", "minLength": 1 },
+    "extracted_at": { "type": "string" },
+    "extractor": { "type": "string", "description": "playwright | vision | manual" },
+    "viewports": {
+      "type": "object",
+      "required": ["desktop", "tablet", "mobile"],
+      "properties": {
+        "desktop": { "$ref": "#/$defs/viewport" },
+        "tablet": { "$ref": "#/$defs/viewport" },
+        "mobile": { "$ref": "#/$defs/viewport" }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "required": ["regions", "hierarchy"],
+      "properties": {
+        "regions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "role"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "role": { "type": "string", "minLength": 1 },
+              "children": { "type": "array", "items": { "type": "string" } },
+              "approximate_height": { "type": "string" }
+            }
+          }
+        },
+        "hierarchy": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "required": ["colors", "typography", "spacing"],
+      "properties": {
+        "colors": {
+          "type": "object",
+          "description": "Named color tokens as #rrggbb hex (or ~#rrggbb when estimated from an image).",
+          "additionalProperties": { "type": "string" }
+        },
+        "typography": {
+          "type": "object",
+          "description": "Named text styles. Keys like h1/h2/body/label, each with size/weight/family.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "size": { "type": "string" },
+              "weight": { "type": "string" },
+              "family": { "type": "string" },
+              "line_height": { "type": "string" }
+            }
+          }
+        },
+        "spacing": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "content": {
+      "type": "object",
+      "required": ["required_text", "required_data"],
+      "properties": {
+        "required_text": { "type": "array", "items": { "type": "string" } },
+        "required_data": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "interactions": {
+      "type": "object",
+      "required": ["states", "elements"],
+      "properties": {
+        "states": { "type": "array", "items": { "type": "string" } },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "trigger", "state"],
+            "properties": {
+              "type": { "type": "string" },
+              "trigger": { "type": "string" },
+              "state": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "viewport": {
+      "type": "object",
+      "required": ["width"],
+      "properties": {
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "screenshot": { "type": "string" }
+      }
+    }
+  }
+}
