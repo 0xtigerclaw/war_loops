@@ -16,6 +16,85 @@ URL / image ──► Pixel ──► (spec gate) ──► Wireframe ──► 
 > `scripts/` are fully runnable on their own; `orchestrator.ts` is included as reference
 > (it still imports mission-control's Convex/agent layer).
 
+## Architecture
+
+```mermaid
+flowchart TB
+    SRC(["URL / Image"]):::io
+    ORCH{{"Orchestrator<br/>runFrontendMirrorPipeline()"}}:::orch
+
+    subgraph S1["① Pixel · Source Analyzer"]
+      direction TB
+      EX["extract-spec.mjs<br/>Playwright — computed styles, DOM,<br/>geometry, screenshots @ 1440/1024/390"]
+      SE{"Spec Evaluator · evaluate-spec.mjs<br/>schema · tokens · layout · content · placeholders"}
+      EX --> SE
+      SE -->|"iterate · re-extract, more effort"| EX
+    end
+
+    subgraph S2["② Wireframe · Design Builder"]
+      direction TB
+      VARS["spec-to-pencil-vars.mjs<br/>tokens → Pencil variables"]
+      BUILD["Pencil CLI<br/>pencil --in/--out --prompt --export<br/>(reference screenshot attached)"]
+      WE{"Wireframe Evaluator · evaluate-wireframe.mjs<br/>claude VISION judge<br/>layout · visual · content · completeness"}
+      VARS --> BUILD --> WE
+      WE -->|"iterate · repair findings (≤3, stagnation guard)"| BUILD
+    end
+
+    FORGE["③ Forge · production React / Tailwind  (stub)"]
+    HAND[/"Verified DesignSpec — handoff"/]:::io
+    OUT[/"wireframe.pen + render + preview"/]:::io
+    REV["⛔ Halt → human review"]:::warn
+
+    subgraph CVX["🗄️ Convex — Memory &amp; State (real-time)"]
+      direction LR
+      T[("tasks<br/>status · outputs · handoff")]
+      EV[("evaluations<br/>per-iteration score · gates · findings")]
+      AC[("agents / activity<br/>live agent log")]
+      MEM[("memories<br/>long-term + embeddings")]
+    end
+
+    UI[/"Mirror Dashboard · app/mirror<br/>subscribes to Convex (live)"/]:::io
+
+    %% --- pipeline flow ---
+    SRC --> ORCH
+    ORCH -->|"Stage 1"| EX
+    SE -->|"pass"| HAND
+    SE -->|"fail"| REV
+    HAND --> ORCH
+    ORCH -->|"Stage 2"| VARS
+    WE -->|"pass / best"| OUT
+    WE -->|"fail / max iters"| REV
+    OUT --> ORCH
+    ORCH -->|"Stage 3"| FORGE
+
+    %% --- memory & state (Convex) ---
+    ORCH <-->|"status / outputs"| T
+    SE -->|"spec gate result"| EV
+    WE -->|"fidelity / iteration"| EV
+    S1 -.->|"activity"| AC
+    S2 -.->|"activity"| AC
+    OUT -.->|"approved → store"| MEM
+    T --> UI
+    EV --> UI
+    AC --> UI
+
+    classDef io fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b;
+    classDef orch fill:#fef3c7,stroke:#d97706,color:#451a03;
+    classDef warn fill:#fee2e2,stroke:#b91c1c,color:#450a0a;
+```
+
+**How to read it**
+
+- **Orchestrator** (`orchestrator.ts`) is the control spine: it sequences the stages, owns every Convex read/write, and decides **pass · iterate · halt** at each gate.
+- **Agents** — each paired with an **evaluator**:
+  - ① **Pixel** — source analyzer (deterministic extraction)
+  - ② **Wireframe** — design builder (drives the Pencil CLI)
+  - ③ **Forge** — production code *(stub)*
+- **Verification loops — the heart of the system:**
+  - **Spec loop** — Pixel extracts → *Spec Evaluator* gates it; `iterate` re-extracts with more effort, `fail` **halts before anything builds on a bad spec**.
+  - **Fidelity loop** — Wireframe builds in Pencil → *Wireframe Evaluator* (a `claude` **vision judge**) compares the render against Pixel's reference and returns repair findings → the agent repairs and rebuilds until fidelity clears the bar (≤3 iterations, stagnation guard). **This loop is what drives 1:1.**
+- **Memory & state — Convex** (real-time): `tasks` (status, outputs, the verified-spec handoff), `evaluations` (every iteration's score / gates / findings), `agents·activity` (live agent log), `memories` (long-term, embedded). The **dashboard** (`app/mirror`) subscribes to Convex for live spec, iteration scorecards, and the activity feed.
+
 ## Stages
 
 | Stage | What it does | Gate / loop |
