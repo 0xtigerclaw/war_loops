@@ -1,15 +1,16 @@
-// Signal: structure — do the spec's layout regions appear in the build, in
-// roughly the right count? Deterministic, non-LLM. Reads built.json.
+// Signal: structure — does the build reproduce the page's structural shape?
+// Deterministic, non-LLM. Reads built.json.
+//
+// We do NOT name-match regions: the spec's region names are unreliable (generic
+// "section_N" on div-soup sites, or noisy duplicate roles), so they don't align
+// with the build's descriptive names. Instead we score the shape we CAN compare
+// reliably: comparable section COUNT + the presence of header/footer bookends.
+// (Whether the right sections are present is judged subjectively by the vision signal.)
 import fs from "node:fs";
 import { clamp } from "./_contract.mjs";
 
-const toks = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
-function similar(a, b) {
-  const A = new Set(toks(a)), B = new Set(toks(b));
-  if (!A.size || !B.size) return 0;
-  let i = 0; for (const x of A) if (B.has(x)) i++;
-  return i / Math.min(A.size, B.size);
-}
+const HEADERISH = /header|nav|top\b|menu/i;
+const FOOTERISH = /footer|copyright|bottom\b/i;
 
 export const name = "structure";
 
@@ -22,14 +23,17 @@ export async function score({ specPath, builtPath }) {
   const builtRegions = (built.regions || []).filter(Boolean);
   if (!specRegions.length || !builtRegions.length) return null;
 
-  let matched = 0;
+  const sc = specRegions.length, bc = builtRegions.length;
+  const countRatio = Math.min(sc, bc) / Math.max(sc, bc);
+
+  const hasHeader = builtRegions.some((r) => HEADERISH.test(r));
+  const hasFooter = builtRegions.some((r) => FOOTERISH.test(r));
+  const bookend = (hasHeader ? 0.5 : 0) + (hasFooter ? 0.5 : 0);
+
+  const s = clamp(80 * countRatio + 20 * bookend);
   const findings = [];
-  for (const sr of specRegions) {
-    if (builtRegions.some((br) => similar(sr, br) >= 0.5)) matched++;
-    else findings.push({ severity: "P2", area: "layout", observed: `Spec region "${sr}" has no clear match in the build`, fix: `Add a "${sr}" section in the right position` });
-  }
-  const coverage = matched / specRegions.length;
-  const countRatio = Math.min(builtRegions.length, specRegions.length) / Math.max(builtRegions.length, specRegions.length);
-  const s = clamp((0.7 * coverage + 0.3 * countRatio) * 100);
-  return { score: s, detail: `${matched}/${specRegions.length} regions matched (${builtRegions.length} built)`, findings };
+  if (countRatio < 0.6) findings.push({ severity: "P2", area: "layout", observed: `Built ${bc} top-level sections vs ${sc} detected in the reference`, fix: `Bring the number of major sections closer to ${sc}` });
+  if (!hasHeader) findings.push({ severity: "P2", area: "layout", observed: "No header/nav region detected in the build", fix: "Add a header/nav section at the top" });
+  if (!hasFooter) findings.push({ severity: "P2", area: "layout", observed: "No footer region detected in the build", fix: "Add a footer section at the bottom" });
+  return { score: s, detail: `${bc} built vs ${sc} spec sections · bookends ${hasHeader ? "H" : "-"}${hasFooter ? "F" : "-"}`, findings };
 }
