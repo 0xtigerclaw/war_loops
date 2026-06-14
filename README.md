@@ -52,7 +52,9 @@ flowchart TB
     end
     ORCH <--> T
     PANEL --> EV
+    S2 -.->|"live activity"| AC
     EV --> UI[/"Mirror Dashboard"/]:::io
+    AC --> UI
 
     classDef io fill:#eef2ff,stroke:#4f46e5;
     classDef orch fill:#fef3c7,stroke:#d97706;
@@ -105,7 +107,7 @@ signal is a file in `signals/` plus a line in `signals.config.json`.
 | `perceptual` | SSIM, structural similarity to the reference | non-LLM |
 | `gist` | overall resemblance (low-res correlation + color histogram) | non-LLM |
 | `tokens` | extracted colors/fonts applied in the build | non-LLM |
-| `structure` | spec regions present + ordered in the build | non-LLM |
+| `structure` | section-count proximity + header/footer bookends (region names are unreliable, so no name-matching) | non-LLM |
 | `content` | required text shipped in the build | non-LLM |
 | `vision` | subjective fidelity (layout, color, hierarchy) | `claude` judge, one weighted voice |
 
@@ -185,7 +187,8 @@ targets.json                     Benchmark corpus
 squad/                           Agent definitions: pixel, wireframe, forge
 skill/frontend-spec-extractor/   Claude skill wrapping the extractor + gate
 ui/                              Mirror dashboard: live spec, per-signal scorecard, activity
-docs/loop-hero.html              The loop-stack brand explainer
+docs/loop-hero.html              The loop-stack brand explainer (rendered to loop-hero.png)
+docs/benchmark-run.md            First benchmark run: fidelity + measured cost
 ```
 
 ## Usage
