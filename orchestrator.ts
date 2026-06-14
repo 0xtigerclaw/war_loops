@@ -4,6 +4,7 @@ import type { Id } from "../convex/_generated/dataModel";
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { pathToFileURL } from "node:url";
 
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL!;
 const MAX_SPEC_ATTEMPTS = 3;
@@ -33,12 +34,17 @@ export async function runFrontendMirrorPipeline(taskId: string) {
 
   // Step 1: Pixel — produce a gated spec (refines until the evaluator passes),
   // then hand it off. Halts the pipeline if the spec can't clear the gate.
+  const tPixel = Date.now();
   const handoff = await runPixelStage(client, id, taskId, task.description || "");
+  recordStage("pixel", tPixel);
   if (!handoff) return; // failPipeline already invoked
 
   // Step 2: Wireframe — the agent translates the verified spec into Pencil
   // (active editor), self-checks structurally + visually, and exports a PNG.
+  const tWf = Date.now();
   const wireframe = await runWireframeStage(client, id, taskId, handoff);
+  recordStage("wireframe", tWf);
+  await writeMetrics(client, id, handoff.specDir);
   if (!wireframe) return; // failPipeline already invoked
 
   // Step 3: Forge — Build production frontend
@@ -220,7 +226,88 @@ function runPencilCli(args: string[], timeoutMs: number): Promise<{ code: number
 }
 
 interface WireframeResult { penPath: string; exportPath?: string; previewPath?: string; score?: number; decision?: string; iterations: number }
-interface WireframeEval { decision: "pass" | "iterate" | "fail"; overallScore: number; dimensions: Record<string, number>; findings: Array<{ severity: string; area: string; observed: string; fix: string }> }
+interface WireframeEval { decision: "pass" | "iterate" | "fail"; overallScore: number; signals: Array<{ name: string; score: number; weight: number; detail: string }>; findings: Array<{ severity: string; area: string; observed: string; fix: string; signal?: string }>; usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number } }
+
+// Appended to every build prompt: the agent reads the document back and reports
+// what it actually built, so the deterministic signals can diff spec vs build.
+const BUILT_REPORT = [
+  "",
+  "FINALLY, read the document back with get_variables and snapshot_layout, then output a fenced json block as the LAST thing in your reply (nothing after it):",
+  "```json",
+  '{ "variables": { "<name>": <value> }, "regions": ["<section names, top to bottom>"], "texts": ["<every visible text string>"] }',
+  "```",
+];
+
+// Pull the build agent's reported {variables, regions, texts} out of stdout.
+function extractBuilt(stdout: string): { variables?: Record<string, unknown>; regions?: string[]; texts?: string[] } | null {
+  let depth = 0, start = -1, inStr = false, esc = false;
+  const objs = [];
+  for (let i = 0; i < stdout.length; i++) {
+    const c = stdout[i];
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === "{") { if (depth === 0) start = i; depth++; }
+    else if (c === "}" && depth > 0) { depth--; if (depth === 0 && start >= 0) { objs.push(stdout.slice(start, i + 1)); start = -1; } }
+  }
+  for (let i = objs.length - 1; i >= 0; i--) {
+    try { const p = JSON.parse(objs[i]); if (p && (p.variables || p.regions || p.texts)) return p; } catch { /* keep */ }
+  }
+  return null;
+}
+
+const READBACK_PROMPT = 'Do not change the design at all. Read the current document with get_variables and snapshot_layout, then output ONLY a fenced json block (nothing else): { "variables": { "<name>": <value> }, "regions": ["<section names, top to bottom>"], "texts": ["<every visible text string>"] }';
+
+// Guarantee built.json exists: if the build's output didn't include the report
+// (common on the heavy initial build), do a cheap read-back pass to extract it.
+async function ensureBuilt(stdout: string, penPath: string, builtPath: string): Promise<void> {
+  let built = extractBuilt(stdout);
+  if (!built) {
+    const rbUsage = path.join(path.dirname(builtPath), "usage", "readback.json");
+    fs.mkdirSync(path.dirname(rbUsage), { recursive: true });
+    const rb = await runPencilCli(["--in", penPath, "--out", path.join(path.dirname(builtPath), "_readback.pen"), "--prompt", READBACK_PROMPT, "--agent", "claude", "--usage", rbUsage], 5 * 60 * 1000);
+    built = extractBuilt(rb.stdout);
+    recordCall("readback", readPencilUsage(rbUsage));
+  }
+  if (built) fs.writeFileSync(builtPath, JSON.stringify(built, null, 2));
+}
+
+// ---- run metrics: time, tokens, cost ----
+interface Usage { inputTokens: number; outputTokens: number; costUsd: number }
+const METRICS = {
+  startedAt: Date.now(),
+  stages: [] as { name: string; seconds: number }[],
+  calls: [] as { call: string; inputTokens: number; outputTokens: number; costUsd: number }[],
+};
+function recordStage(name: string, t0: number) { METRICS.stages.push({ name, seconds: Math.round((Date.now() - t0) / 1000) }); }
+function recordCall(call: string, u: Partial<Usage>) { METRICS.calls.push({ call, inputTokens: u.inputTokens || 0, outputTokens: u.outputTokens || 0, costUsd: u.costUsd || 0 }); }
+function readPencilUsage(p: string): Partial<Usage> {
+  try {
+    const j = JSON.parse(fs.readFileSync(p, "utf-8"));
+    return {
+      inputTokens: j.inputTokens ?? j.input_tokens ?? j.promptTokens ?? j.tokens?.input ?? j.usage?.input_tokens ?? 0,
+      outputTokens: j.outputTokens ?? j.output_tokens ?? j.completionTokens ?? j.tokens?.output ?? j.usage?.output_tokens ?? 0,
+      costUsd: j.cost ?? j.costUsd ?? j.total_cost_usd ?? j.totalCost ?? 0,
+    };
+  } catch { return {}; }
+}
+async function writeMetrics(client: ConvexHttpClient, id: Id<"tasks">, specDir: string) {
+  const totalSeconds = Math.round((Date.now() - METRICS.startedAt) / 1000);
+  const inputTokens = METRICS.calls.reduce((s, c) => s + c.inputTokens, 0);
+  const outputTokens = METRICS.calls.reduce((s, c) => s + c.outputTokens, 0);
+  const costUsd = +METRICS.calls.reduce((s, c) => s + c.costUsd, 0).toFixed(4);
+  const metrics = { totalSeconds, tokens: { input: inputTokens, output: outputTokens }, costUsd, stages: METRICS.stages, calls: METRICS.calls };
+  try { fs.writeFileSync(path.join(specDir, "metrics.json"), JSON.stringify(metrics, null, 2)); } catch { /* ignore */ }
+  const mm = Math.floor(totalSeconds / 60), ss = totalSeconds % 60;
+  const summary = `⏱ ${mm}m${ss}s · ${Math.round(inputTokens / 1000)}k in / ${Math.round(outputTokens / 1000)}k out · $${costUsd.toFixed(2)}`;
+  console.log(`[MIRROR] metrics: ${summary}`);
+  await client.mutation(api.tasks.appendOutput, {
+    id,
+    title: `Run metrics — ${summary}`,
+    content: `**Time:** ${mm}m ${ss}s\n**Tokens:** ${inputTokens.toLocaleString()} in / ${outputTokens.toLocaleString()} out\n**Cost:** $${costUsd.toFixed(2)}\n\n` +
+      METRICS.calls.map((c) => `- ${c.call}: $${c.costUsd.toFixed(3)} (${c.inputTokens.toLocaleString()}+${c.outputTokens.toLocaleString()} tok)`).join("\n"),
+    agent: "Orchestrator",
+  }).catch(() => ({}));
+}
 
 // Initial build brief: a high-fidelity 1:1 mirror. The reference screenshot is
 // ALSO attached to the CLI call (-f), so the agent sees the target directly.
@@ -245,29 +332,40 @@ function buildWireframePrompt(spec: DesignSpec, varsJson: string, hasReference: 
     ...text.map((t) => `- ${t}`),
     "",
     "One top-level frame. Keep it clean — don't wrap every element in a card. Nothing clipped or overlapping.",
+    ...BUILT_REPORT,
   ].join("\n");
 }
 
-// Repair brief for an iterate cycle: only the evaluator's findings.
+// Surgical critic: focus the weakest signals + the most impactful findings, and
+// tell the agent to fix ONLY those (no rebuild). Mirrors warloops/scripts/critic.mjs.
 function buildRepairPrompt(spec: DesignSpec, ev: WireframeEval): string {
+  const SEV: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+  const weakest = [...(ev.signals || [])].sort((a, b) => a.score - b.score).slice(0, 3).map((s) => s.name);
+  const rank = (f: { severity: string; signal?: string }) => (SEV[f.severity] ?? 9) * 10 + (weakest.includes(f.signal || "") ? 0 : 5);
+  const chosen = [...(ev.findings || [])]
+    .filter((f) => weakest.includes(f.signal || "") || f.severity === "P0" || f.severity === "P1")
+    .sort((a, b) => rank(a) - rank(b))
+    .slice(0, 6);
+  const list = chosen.length ? chosen : (ev.findings || []).slice(0, 6);
   return [
-    `Improve the existing wireframe mirror of "${spec.source_ref}" to better match the ORIGINAL (attached as the first image; current render is the second).`,
-    `Current fidelity: ${ev.overallScore}/100. Fix these issues precisely, most important first — do not rebuild from scratch:`,
+    `Improve the wireframe mirror of "${spec.source_ref}" toward the ORIGINAL (attached first; current render second). Fidelity ${ev.overallScore}/100; weakest areas: ${weakest.join(", ")}.`,
+    `Fix ONLY these ${list.length} issues, most impactful first. Do NOT rebuild, and do NOT touch parts that already match:`,
     "",
-    ...ev.findings.map((f) => `- [${f.severity}] ${f.area}: ${f.observed} → ${f.fix}`),
+    ...list.map((f) => `- [${f.severity}] ${f.area}: ${f.fix}${f.observed ? `  (now: ${f.observed})` : ""}`),
     "",
-    "Keep everything that already matches. Replicate any still-missing images/media with Generate. Nothing clipped or overlapping.",
+    "Replicate any still-missing images/media with Generate. Nothing clipped or overlapping.",
+    ...BUILT_REPORT,
   ].join("\n");
 }
 
 // Map the vision-judge eval onto the dashboard's evaluation scorecard shape.
 function toEvaluationRecord(ev: WireframeEval) {
   const gates: Record<string, { status: string; score: number }> = {};
-  for (const [k, v] of Object.entries(ev.dimensions || {})) gates[k] = { status: v >= 70 ? "pass" : "fail", score: v };
+  for (const s of ev.signals || []) gates[s.name] = { status: s.score >= 70 ? "pass" : "fail", score: s.score };
   const findings = (ev.findings || []).map((f, i) => ({
     id: `WF-${i + 1}`,
     severity: f.severity || "P2",
-    category: f.area || "fidelity",
+    category: f.signal ? `${f.signal}/${f.area}` : (f.area || "fidelity"),
     viewport: "desktop",
     state: "default",
     observed: f.observed || "",
@@ -321,9 +419,14 @@ async function runWireframeStage(
       : ["--out", penPath, "--prompt", buildWireframePrompt(handoff.spec, varsJson, hasReference)];
     if (hasReference) buildArgs.push("-f", refPath);
     if (isRepair && fs.existsSync(exportPath)) buildArgs.push("-f", exportPath);
-    buildArgs.push("--agent", "claude", "--export", exportPath, "--enable-preview", "--preview-output", previewPath);
+    const buildUsage = path.join(specDir, "usage", `build-${iter}.json`);
+    fs.mkdirSync(path.dirname(buildUsage), { recursive: true });
+    buildArgs.push("--agent", "claude", "--export", exportPath, "--enable-preview", "--preview-output", previewPath, "--usage", buildUsage);
 
+    const tBuild = Date.now();
     const run = await runPencilCli(buildArgs, WIREFRAME_TIMEOUT_MS);
+    recordStage(`wireframe.build.${iter}`, tBuild);
+    recordCall(`build.${iter}`, readPencilUsage(buildUsage));
     if (run.code !== 0 || !fs.existsSync(penPath)) {
       if (iter === 0) { await failPipeline(client, id, "Wireframe", `Pencil CLI failed (code ${run.code}): ${(run.stderr || run.stdout).slice(-400)}`); return null; }
       break; // keep best-so-far on a later-iteration failure
@@ -331,11 +434,20 @@ async function runWireframeStage(
 
     if (!fs.existsSync(exportPath)) break; // can't evaluate without a render
 
-    // Vision-judge fidelity vs the reference capture.
-    const evRun = await runNode("warloops/scripts/evaluate-wireframe.mjs", ["--reference", refPath, "--render", exportPath, "--spec", handoff.specPath, "--json"]);
+    // Persist what was built (read-back fallback ensures it exists even on iter 0).
+    const builtPath = path.join(specDir, "built.json");
+    await ensureBuilt(run.stdout, penPath, builtPath);
+
+    // Multi-signal fidelity vs the reference capture (panel runs the enabled signals).
+    const evalArgs = ["--reference", refPath, "--render", exportPath, "--spec", handoff.specPath, "--pen", penPath, "--json"];
+    if (fs.existsSync(builtPath)) evalArgs.push("--built", builtPath);
+    const tEval = Date.now();
+    const evRun = await runNode("warloops/scripts/evaluate.mjs", evalArgs);
+    recordStage(`eval.${iter}`, tEval);
     let ev: WireframeEval | null = null;
     try { ev = JSON.parse(evRun.stdout); } catch { /* no verdict */ }
-    if (!ev) { lastEval = lastEval || { decision: "iterate", overallScore: 0, dimensions: {}, findings: [] }; break; }
+    if (ev && ev.usage) recordCall(`eval.${iter}`, ev.usage);
+    if (!ev) { lastEval = lastEval || { decision: "iterate", overallScore: 0, signals: [], findings: [] }; break; }
     lastEval = ev;
 
     const rec = toEvaluationRecord(ev);
@@ -378,11 +490,15 @@ async function runWireframeStage(
   return result;
 }
 
-// Entry point when called directly
-const taskId = process.argv[2];
-if (taskId) {
-  runFrontendMirrorPipeline(taskId).catch((err) => {
-    console.error(`[MIRROR] Fatal error:`, err);
-    process.exit(1);
-  });
+// Entry point — only when this file is the directly-invoked script (not when
+// imported, e.g. by the benchmark runner, which would otherwise misread argv).
+const invokedDirectly = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) {
+  const taskId = process.argv[2];
+  if (taskId) {
+    runFrontendMirrorPipeline(taskId).catch((err) => {
+      console.error(`[MIRROR] Fatal error:`, err);
+      process.exit(1);
+    });
+  }
 }

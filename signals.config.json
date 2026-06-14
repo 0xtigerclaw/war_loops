@@ -1,0 +1,15 @@
+{
+  "_comment": "War Loops fidelity signal panel. One control surface: toggle signals, set weights (renormalized over enabled signals), tune the pass bar. Weights are relative.",
+  "targetScore": 90,
+  "iterateFloor": 60,
+  "maxIterations": 3,
+  "models": { "judge": "claude" },
+  "signals": [
+    { "name": "perceptual", "weight": 0.12, "enabled": true,  "note": "SSIM: structural similarity to the reference (non-LLM)" },
+    { "name": "gist",       "weight": 0.18, "enabled": true,  "note": "overall resemblance: low-res correlation + color histogram (non-LLM, local, no deps)" },
+    { "name": "tokens",     "weight": 0.18, "enabled": true, "note": "extracted color/type tokens vs the built .pen (deterministic)" },
+    { "name": "structure",  "weight": 0.14, "enabled": true, "note": "spec regions/order vs built layout (deterministic)" },
+    { "name": "content",    "weight": 0.14, "enabled": true,  "note": "required_text present in the build (deterministic)" },
+    { "name": "vision",     "weight": 0.24, "enabled": true,  "note": "claude vision judge: subjective fidelity (LLM)" }
+  ]
+}

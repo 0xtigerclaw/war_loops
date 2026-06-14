@@ -1,0 +1,13 @@
+{
+  "_comment": "Benchmark corpus for War Loops. A fixed, varied set of reference pages. Run: npx tsx warloops/scripts/benchmark.ts [--only=name1,name2]. Results land in warloops/benchmark/.",
+  "targets": [
+    { "name": "tailwind",  "url": "https://tailwindcss.com",  "kind": "marketing, dense" },
+    { "name": "vercel",    "url": "https://vercel.com",       "kind": "marketing, dark" },
+    { "name": "linear",    "url": "https://linear.app",       "kind": "saas, minimal" },
+    { "name": "railway",   "url": "https://railway.app",      "kind": "saas, dark" },
+    { "name": "resend",    "url": "https://resend.com",       "kind": "dev tool, clean" },
+    { "name": "supabase",  "url": "https://supabase.com",     "kind": "marketing, green" },
+    { "name": "clerk",     "url": "https://clerk.com",        "kind": "saas, gradient" },
+    { "name": "posthog",   "url": "https://posthog.com",      "kind": "marketing, playful" }
+  ]
+}

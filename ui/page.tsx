@@ -211,8 +211,8 @@ export default function MirrorDashboard() {
             <ArrowLeft size={20} />
           </Link>
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-black mb-1">Mirror Pipeline</h1>
-            <p className="text-gray-500 text-sm">Frontend design mirroring — source → wireframe → production code</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-black mb-1">War Loops</h1>
+            <p className="text-gray-500 text-sm">Autonomous frontend designer: source → spec → wireframe → production code</p>
           </div>
         </div>
         <button

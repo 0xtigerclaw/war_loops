@@ -47,7 +47,7 @@ export default function MirrorSquad() {
           <div className="p-1.5 rounded-lg bg-violet-600 text-white">
             <Layers size={16} />
           </div>
-          <h3 className="font-semibold text-sm text-violet-900">Frontend Mirror</h3>
+          <h3 className="font-semibold text-sm text-violet-900">War Loops</h3>
           <span className="text-xs text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full ml-auto">
             Pixel → Wireframe ⟳ Eval → Forge
           </span>
