@@ -8,7 +8,7 @@ weighted panel of signals says it matches. The whole thing is a stack of judge-g
 judge is the point: design fidelity is something everyone can feel but nobody measures. War Loops
 measures it.
 
-![War Loops — five nested loops, each with its own judge and exit](docs/loop-hero.png)
+![War Loops: five nested loops, each with its own judge and exit](docs/loop-hero.png)
 
 ## Architecture
 
