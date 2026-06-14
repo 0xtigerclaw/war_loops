@@ -146,13 +146,13 @@ breakdown in [`docs/benchmark-run.md`](docs/benchmark-run.md).
 
 | target | fidelity | total cost | of which build | wall time |
 |--------|----------|------------|----------------|-----------|
-| vercel | 72 / 100 | ~$5.2 | $4.34 | ~17 min |
-| linear | 72 / 100 | ~$3.0 | $2.10 | ~12 min |
-| tailwind | 70 / 100 | ~$6.3 | $5.51 | ~26 min |
+| vercel | 72 / 100 | ≈$5.2 | $4.34 | ≈17 min |
+| linear | 72 / 100 | ≈$3.0 | $2.10 | ≈12 min |
+| tailwind | 70 / 100 | ≈$6.3 | $5.51 | ≈26 min |
 
 Mean fidelity **71 / 100**, in a tight band, and the score held steady when the vision judge drifted
-~10 points (the grounding working). **Where the money goes:** the five deterministic signals cost
-**$0**, the vision judge is **~$0.27 per eval**, and the **Pencil build agent (opus-4-6) is the whole
+≈10 points (the grounding working). **Where the money goes:** the five deterministic signals cost
+**$0**, the vision judge is **≈$0.27 per eval**, and the **Pencil build agent (opus-4-6) is the whole
 bill** at roughly $1.5 to $2 per build. The cost is the build model, and it is a routing dial: send
 that one step to a cheaper model and the dominant line item drops, at a quality tradeoff you can
 measure on this same benchmark.
