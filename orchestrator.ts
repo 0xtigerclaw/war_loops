@@ -23,6 +23,7 @@ interface DesignSpec {
 }
 
 export async function runFrontendMirrorPipeline(taskId: string) {
+  resetMetrics();
   const client = new ConvexHttpClient(CONVEX_URL);
   const id = taskId as Id<"tasks">;
 
@@ -283,13 +284,18 @@ function recordCall(call: string, u: Partial<Usage>) { METRICS.calls.push({ call
 function readPencilUsage(p: string): Partial<Usage> {
   try {
     const j = JSON.parse(fs.readFileSync(p, "utf-8"));
+    const u = j.usage || j; // Pencil writes { usage: { totalCostUsd, inputTokens, ... } }
     return {
-      inputTokens: j.inputTokens ?? j.input_tokens ?? j.promptTokens ?? j.tokens?.input ?? j.usage?.input_tokens ?? 0,
-      outputTokens: j.outputTokens ?? j.output_tokens ?? j.completionTokens ?? j.tokens?.output ?? j.usage?.output_tokens ?? 0,
-      costUsd: j.cost ?? j.costUsd ?? j.total_cost_usd ?? j.totalCost ?? 0,
+      inputTokens: (u.inputTokens ?? u.input_tokens ?? 0) + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0),
+      outputTokens: u.outputTokens ?? u.output_tokens ?? 0,
+      costUsd: u.totalCostUsd ?? u.total_cost_usd ?? u.costUsd ?? u.cost ?? 0,
     };
   } catch { return {}; }
 }
+
+// Reset the per-run accumulator (the orchestrator may run many tasks in one process,
+// e.g. the benchmark, where metrics would otherwise bleed across targets).
+function resetMetrics() { METRICS.startedAt = Date.now(); METRICS.stages = []; METRICS.calls = []; }
 async function writeMetrics(client: ConvexHttpClient, id: Id<"tasks">, specDir: string) {
   const totalSeconds = Math.round((Date.now() - METRICS.startedAt) / 1000);
   const inputTokens = METRICS.calls.reduce((s, c) => s + c.inputTokens, 0);
