@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 // Frontend Mirror — deterministic spec extractor (Pixel's eyes).
 //
-// URL mode: launches headless Chromium (playwright-core), captures screenshots
-// at 3 viewports, and reads REAL computed styles / DOM text. No guessing.
-// Image mode: emits a spec template + screenshot copy for the model to fill via
-// vision, then validate with evaluate-spec.mjs.
+// URL mode captures screenshots at 3 viewports and reads REAL computed styles /
+// DOM text. To get past bot walls (Cloudflare etc.) it drives a GENUINE browser:
+//   - default: real Chrome with a persistent profile (channel:"chrome", headed),
+//     waiting for any JS challenge to auto-clear; the clearance cookie persists.
+//   - --cdp <url>: attach to an already-running Chrome over CDP (your real
+//     session, cookies + logins intact). Most robust for protected/auth pages.
+//   - --headless: legacy bundled-Chromium headless (fast, but bot-walls block it).
+// A `blocked` flag is set if we still land on a challenge page.
+// Image mode emits a spec template + screenshot copy for the model to fill via vision.
 //
 // Usage:
 //   node warloops/scripts/extract-spec.mjs --url <url> [--out <dir>] [--name <label>]
+//                                          [--cdp http://localhost:9222] [--headless] [--profile <dir>]
 //   node warloops/scripts/extract-spec.mjs --image <path> [--out <dir>] [--name <label>]
 //
 // Output: <out>/spec.json (+ <out>/screenshots/{desktop,tablet,mobile}.png for URLs)
@@ -15,6 +21,10 @@
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+
+// Signatures of bot-wall / challenge / interstitial pages.
+const CHALLENGE_RE = /just a moment|checking your browser|verifying you are (a )?human|attention required|performing security verification|verifying\.\.\.|enable javascript and cookies|ddos protection by/i;
 
 const VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
@@ -221,51 +231,99 @@ function pageExtract() {
   };
 }
 
+// Acquire a browser context. Default = genuine Chrome with a persistent profile
+// (passes bot walls); --cdp attaches to a running Chrome; --headless = legacy.
+async function getBrowserContext(opts) {
+  if (opts.cdp) {
+    const browser = await chromium.connectOverCDP(opts.cdp);
+    const context = browser.contexts()[0] || (await browser.newContext());
+    return { context, mode: "cdp", cleanup: async () => { await browser.close().catch(() => {}); } };
+  }
+  if (opts.headless) {
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ viewport: VIEWPORTS.desktop, deviceScaleFactor: 1 });
+    return { context, mode: "headless", cleanup: async () => browser.close() };
+  }
+  const userDataDir = opts.profile || path.join(os.homedir(), ".war-loops", "chrome-profile");
+  fs.mkdirSync(userDataDir, { recursive: true });
+  const context = await chromium.launchPersistentContext(userDataDir, {
+    channel: "chrome",
+    headless: false,
+    viewport: VIEWPORTS.desktop,
+    deviceScaleFactor: 1,
+    args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"],
+  });
+  return { context, mode: "chrome", cleanup: async () => context.close() };
+}
+
+// Wait for a Cloudflare-style JS challenge to auto-resolve (a real browser clears
+// it within a few seconds; the page title stops matching the challenge text).
+async function waitForChallengeClear(page, ms = 25000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const title = await page.title().catch(() => "");
+    if (!CHALLENGE_RE.test(title || "")) return;
+    await page.waitForTimeout(1500);
+  }
+}
+
+function looksBlocked(title, bodyText, regionCount) {
+  if (CHALLENGE_RE.test(title || "") || CHALLENGE_RE.test(bodyText || "")) return true;
+  return regionCount === 0 && /cloudflare|ray id/i.test(bodyText || "");
+}
+
+async function autoScroll(page) {
+  await page.evaluate(async () => {
+    await new Promise((res) => {
+      let y = 0;
+      const step = window.innerHeight;
+      const timer = setInterval(() => {
+        window.scrollBy(0, step);
+        y += step;
+        if (y >= document.body.scrollHeight) { clearInterval(timer); window.scrollTo(0, 0); res(); }
+      }, 100);
+    });
+  });
+  await page.waitForTimeout(600);
+}
+
 async function extractUrl(url, outDir, name, opts = {}) {
-  const settle = Number.isFinite(opts.settle) ? opts.settle : 1200;
+  const settle = Number.isFinite(opts.settle) ? opts.settle : 1500;
   const scroll = !!opts.scroll;
   fs.mkdirSync(path.join(outDir, "screenshots"), { recursive: true });
-  const browser = await chromium.launch({ headless: true });
+  const { context, mode, cleanup } = await getBrowserContext(opts);
   let analysis = null;
+  let blocked = false;
   const viewports = {};
   try {
     for (const [key, vp] of Object.entries(VIEWPORTS)) {
-      const ctx = await browser.newContext({ viewport: vp, deviceScaleFactor: 1 });
-      const page = await ctx.newPage();
-      await page.goto(url, { waitUntil: "networkidle", timeout: 45000 }).catch(async () => {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-      });
-      await page.waitForTimeout(settle); // let lazy content settle
-      if (scroll) {
-        // Scroll through the full page to trigger lazy-loaded / on-view content.
-        await page.evaluate(async () => {
-          await new Promise((res) => {
-            let y = 0;
-            const step = window.innerHeight;
-            const timer = setInterval(() => {
-              window.scrollBy(0, step);
-              y += step;
-              if (y >= document.body.scrollHeight) { clearInterval(timer); window.scrollTo(0, 0); res(); }
-            }, 100);
-          });
-        });
-        await page.waitForTimeout(600);
-      }
+      const page = await context.newPage();
+      await page.setViewportSize(vp).catch(() => {}); // CDP real tabs may not allow override
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+      await page.waitForTimeout(settle);
+      await waitForChallengeClear(page); // let the bot-wall JS challenge auto-resolve
+      await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+      if (scroll) await autoScroll(page);
       const shotPath = path.join(outDir, "screenshots", `${key}.png`);
       await page.screenshot({ path: shotPath, fullPage: true });
       viewports[key] = { width: vp.width, height: vp.height, screenshot: path.relative(outDir, shotPath) };
-      if (key === "desktop") analysis = await page.evaluate(pageExtract);
-      await ctx.close();
+      if (key === "desktop") {
+        analysis = await page.evaluate(pageExtract);
+        const bodyText = await page.evaluate(() => (document.body && document.body.innerText ? document.body.innerText.slice(0, 500) : "")).catch(() => "");
+        blocked = looksBlocked(analysis.title, bodyText, analysis.layout.regions.length);
+      }
+      await page.close();
     }
   } finally {
-    await browser.close();
+    await cleanup();
   }
 
   return {
     source_type: "url",
     source_ref: url,
     extracted_at: new Date().toISOString(),
-    extractor: "playwright",
+    extractor: mode === "cdp" ? "playwright-cdp" : mode === "chrome" ? "playwright-chrome" : "playwright-headless",
+    blocked,
     name: name || analysis?.title || slugify(url),
     viewports,
     layout: analysis.layout,
@@ -310,15 +368,22 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
 
   const spec = args.url
-    ? await extractUrl(args.url, outDir, args.name, { settle: args.settle ? parseInt(args.settle, 10) : undefined, scroll: !!args.scroll })
+    ? await extractUrl(args.url, outDir, args.name, {
+        settle: args.settle ? parseInt(args.settle, 10) : undefined,
+        scroll: !!args.scroll,
+        cdp: typeof args.cdp === "string" ? args.cdp : undefined,
+        headless: !!args.headless,
+        profile: typeof args.profile === "string" ? args.profile : undefined,
+      })
     : imageTemplate(args.image, outDir, args.name);
 
   const specPath = path.join(outDir, "spec.json");
   fs.writeFileSync(specPath, JSON.stringify(spec, null, 2));
   console.log(`[extract-spec] ${spec.source_type} spec written: ${specPath}`);
   if (spec.source_type === "url") {
-    console.log(`[extract-spec] screenshots: ${path.join(outDir, "screenshots")} (desktop/tablet/mobile)`);
-    console.log(`[extract-spec] colors=${JSON.stringify(spec.tokens.colors)} regions=${spec.layout.regions.length} text=${spec.content.required_text.length}`);
+    console.log(`[extract-spec] mode=${spec.extractor} screenshots: ${path.join(outDir, "screenshots")} (desktop/tablet/mobile)`);
+    console.log(`[extract-spec] colors=${JSON.stringify(spec.tokens.colors)} regions=${spec.layout.regions.length} text=${spec.content.required_text.length} blocked=${spec.blocked}`);
+    if (spec.blocked) console.error(`[extract-spec] ⚠️  BLOCKED: landed on a bot-wall / challenge page. Try --cdp <runningChromeUrl>, re-run (profile may clear on retry), or use image mode.`);
   } else {
     console.log(`[extract-spec] template only — fill via vision, then evaluate.`);
   }

@@ -167,8 +167,12 @@ ui/                              Mirror dashboard: live spec, iteration scorecar
 ## Usage
 
 ```bash
-# Pixel: extract a ground-truth spec from a live page
+# Pixel: extract a ground-truth spec from a live page (genuine Chrome by default)
 node scripts/extract-spec.mjs --url https://example.com --out ./out
+
+# Bot-walled or login-gated? Attach to your already-running Chrome over CDP:
+#   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222
+node scripts/extract-spec.mjs --url https://www.perplexity.ai/comet --out ./out --cdp http://localhost:9222
 
 # Spec gate
 node scripts/evaluate-spec.mjs ./out/spec.json
@@ -180,9 +184,19 @@ node scripts/spec-to-pencil-vars.mjs ./out/spec.json
 node scripts/evaluate-wireframe.mjs --reference ./out/screenshots/desktop.png --render ./out/wireframe.png --spec ./out/spec.json
 ```
 
+## Capture: beating bot walls
+
+Pixel drives a **genuine browser** so protected sites do not flag it as a bot:
+
+- **Default:** real Chrome (`channel:"chrome"`, headed) with a persistent profile, waiting for any Cloudflare-style JS challenge to auto-clear; the clearance cookie persists across runs.
+- **`--cdp <url>`:** attach to an already-running Chrome (your real, logged-in session). Most robust for auth-gated or hard-walled pages.
+- **`--headless`:** legacy bundled-Chromium (fast, but bot walls block it).
+
+If a capture still lands on a challenge page, the spec is flagged `blocked` and the pipeline **halts** instead of building from a wall. Use `--cdp`, retry, or image mode.
+
 ## Requirements
 
-- **Playwright** Chromium (`playwright-core`) for page extraction
+- **Google Chrome** installed (real-browser capture) plus `playwright-core`
 - **Pencil CLI** authenticated (`pencil login`) for the Wireframe build stage
 - **`claude`** CLI authenticated for the vision fidelity judge
 

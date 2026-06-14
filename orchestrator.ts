@@ -13,6 +13,7 @@ const MAX_WIREFRAME_ITERATIONS = 3;
 interface DesignSpec {
   source_type: "url" | "image";
   source_ref: string;
+  blocked?: boolean;
   viewports: Record<string, { width: number; screenshot?: string }>;
   layout: { regions: Array<{ name: string; role: string; children?: string[]; approximate_height?: string }>; hierarchy: string };
   tokens: { colors: Record<string, string>; typography: Record<string, Record<string, string>>; spacing: Record<string, string> };
@@ -119,13 +120,26 @@ async function runPixelStage(
   let best: { spec: DesignSpec; evaluation: SpecEvaluation } | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Real Chrome + full-page scroll are the defaults (beats bot walls, pulls in
+    // lazy content). WARLOOPS_CDP attaches to a running, logged-in Chrome.
     const extractArgs = sourceRef.type === "url"
-      ? ["--url", sourceRef.ref, "--out", specDir, "--settle", String(1200 + (attempt - 1) * 2500), ...(attempt > 1 ? ["--scroll"] : [])]
+      ? ["--url", sourceRef.ref, "--out", specDir, "--scroll", "--settle", String(1500 + (attempt - 1) * 2500), ...(process.env.WARLOOPS_CDP ? ["--cdp", process.env.WARLOOPS_CDP] : [])]
       : ["--image", sourceRef.ref, "--out", specDir];
 
     const extract = await runNode("warloops/scripts/extract-spec.mjs", extractArgs);
     if (extract.code !== 0 || !fs.existsSync(specPath)) {
       await failPipeline(client, id, "Pixel", `Spec extraction failed for ${sourceRef.ref}: ${(extract.stderr || extract.stdout).slice(-400)}`);
+      return null;
+    }
+
+    const spec = JSON.parse(fs.readFileSync(specPath, "utf-8")) as DesignSpec;
+
+    // Hard gate: a bot-wall / challenge page is never usable. Retry (the profile
+    // may clear), then fail loudly rather than building from a blocked capture.
+    if (spec.blocked) {
+      await client.mutation(api.agents.logActivity, { agentName: "Pixel", type: "error", content: `Capture blocked (bot wall) on attempt ${attempt}/${maxAttempts}` });
+      if (attempt < maxAttempts) { console.log(`[MIRROR] Capture blocked — retrying`); continue; }
+      await failPipeline(client, id, "Pixel", `Source is bot-protected (e.g. Cloudflare) or login-gated: capture returned a challenge page, not the real page. Set WARLOOPS_CDP to attach to your logged-in Chrome, or use image mode (provide a screenshot).`);
       return null;
     }
 
@@ -138,7 +152,6 @@ async function runPixelStage(
       return null;
     }
 
-    const spec = JSON.parse(fs.readFileSync(specPath, "utf-8")) as DesignSpec;
     if (!best || evaluation.overallScore > best.evaluation.overallScore) best = { spec, evaluation };
 
     await client.mutation(api.agents.logActivity, {
