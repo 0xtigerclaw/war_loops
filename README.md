@@ -3,10 +3,12 @@
 **The art of quantifying the unquantifiable.**
 
 Point War Loops at a **URL or an image**. It captures the page with a genuine browser, extracts a
-ground-truth design spec, rebuilds it in Pencil, and **self-corrects against the original** until a
-weighted panel of signals says it matches. The whole thing is a stack of judge-gated loops, and the
-judge is the point: design fidelity is something everyone can feel but nobody measures. War Loops
-measures it.
+ground-truth design spec, and produces **two self-correcting builds**: a polished static mirror in
+Pencil, and a **moving code build (Forge)** that reproduces that design and layers on the original's
+motion. Every build is judged against the original and repaired until the measures say it matches.
+The whole thing is a stack of judge-gated loops, and the judge is the point: fidelity is something
+everyone can feel but nobody measures. War Loops measures it on **three axes** - static design,
+experiential motion, and responsive reflow.
 
 ![War Loops: five nested loops, each with its own judge and exit](docs/loop-hero.png)
 
@@ -24,35 +26,42 @@ flowchart TB
       SE -->|"iterate / blocked-halt"| EX
     end
 
-    subgraph S2["Wireframe · Builder + Fidelity Loop"]
+    subgraph S2["Wireframe · Pencil builder + static loop"]
       direction TB
-      VARS["tokens → Pencil variables"]
       BUILD["Pencil CLI build<br/>(reference attached) → built.json"]
-      PANEL["Fidelity Signal Panel<br/>perceptual · gist · tokens · structure · content · vision"]
-      CRITIC["Surgical critic<br/>weakest signals → targeted fixes"]
-      VARS --> BUILD --> PANEL --> CRITIC
+      PANEL["Static panel<br/>layout · perceptual · gist · tokens · structure · content · vision"]
+      CRITIC["Surgical critic"]
+      BUILD --> PANEL --> CRITIC
       CRITIC -->|"repair, do not rebuild"| BUILD
     end
 
-    FORGE["Forge · production code (stub)"]
-    OUT[/"wireframe.pen + render + metrics.json"/]:::io
+    subgraph S3["Forge · code builder + 3-axis loop"]
+      direction TB
+      GEN["claude codegen<br/>Pencil render = base + original's motion"]
+      AX["Three axes<br/>static · experiential (motion-match) · responsive (reflow)"]
+      CR2["Surgical repair"]
+      GEN --> AX --> CR2
+      CR2 -->|"repair weakest, keep best"| GEN
+    end
+
+    OUT[/"wireframe.pen · index.html (moving) · metrics.json"/]:::io
 
     SRC --> ORCH
     ORCH --> EX
-    SE -->|"verified spec"| VARS
-    PANEL -->|"pass / best"| OUT
-    OUT --> FORGE
+    SE -->|"verified spec (+ motion)"| BUILD
+    PANEL -->|"pass / best"| GEN
+    AX --> OUT
 
     subgraph CVX["Convex · Memory and State (real-time)"]
       direction LR
       T[("tasks")]
-      EV[("evaluations<br/>per-signal, per-iteration")]
+      EV[("evaluations<br/>per-signal, per-axis")]
       AC[("agents / activity")]
       MEM[("memories")]
     end
     ORCH <--> T
     PANEL --> EV
-    S2 -.->|"live activity"| AC
+    AX --> EV
     EV --> UI[/"Mirror Dashboard"/]:::io
     AC --> UI
 
@@ -60,9 +69,10 @@ flowchart TB
     classDef orch fill:#fef3c7,stroke:#d97706;
 ```
 
-The agents (Pixel, Wireframe) are the stable core. The intelligence lives in the **evaluation
-spine**: a grounded multi-signal panel, a surgical critic, and a benchmark that tunes the whole
-machine over time.
+The agents (Pixel, Wireframe, Forge) are the stable core. The intelligence lives in the **evaluation
+spine**: a grounded multi-signal panel, a surgical critic, a benchmark that tunes the machine over
+time, and three separately-measured fidelity axes so "static design" and "moves like the original"
+never get confused for one another.
 
 ## The loop stack
 
@@ -92,9 +102,9 @@ Memory is a first-class part of the design, all backed by Convex plus the model'
 
 | Stage | What it does | Gate / loop |
 |-------|--------------|-------------|
-| **Pixel** | Genuine-browser capture of real computed styles, DOM text, and geometry at 1440/1024/390 into a `DesignSpec` | **Spec gate** (deterministic): schema, tokens, layout, content, no-placeholders; hard-halts on a bot-wall capture |
-| **Wireframe** | Tokens → Pencil variables, then the Pencil CLI builds a real `.pen` (reference attached) and reports `built.json` | **Signal panel** scores fidelity; the **surgical critic** drives a repair loop toward 1:1 |
-| **Forge** | Production React / Tailwind from the verified design | *(stub)* |
+| **Pixel** | Genuine-browser capture of real computed styles, DOM text, geometry, and **motion** (keyframes, transitions, scroll-reveal) at 1440/1024/390 into a `DesignSpec` | **Spec gate** (deterministic): schema, tokens, layout, content, no-placeholders; hard-halts on a bot-wall capture |
+| **Wireframe** | Tokens → Pencil variables, then the Pencil CLI builds a real `.pen` (reference attached) and reports `built.json` | **Static panel** scores desktop fidelity; the **surgical critic** drives a repair loop toward 1:1 |
+| **Forge** | A `claude` codegen pass that takes the **Pencil render as the visual base** and reproduces it as self-contained, animated, responsive HTML, layering on the original's motion | Scored on **three axes** (static / experiential / responsive); a surgical repair loop targets the weakest, keeping the best build |
 
 ## The fidelity signal panel
 
@@ -120,7 +130,27 @@ the blind spot `perceptual` (whole-frame SSIM) and the name-free `structure` sig
 
 Each signal returns a 0..100 score plus findings; the aggregator (`scripts/evaluate.mjs`) blends a
 weighted overall, a decision, and merged findings. Signals abstain gracefully if unavailable, so the
-panel degrades instead of failing.
+panel degrades instead of failing. That weighted overall is the **static** axis.
+
+## Three axes of fidelity
+
+A static snapshot and a living page are different goals, so War Loops scores **three axes and never
+blends them** - a build can be a faithful still and still feel dead, and the numbers say so separately.
+
+| Axis | Question | How it is measured | Applies to |
+|------|----------|--------------------|------------|
+| **Static** | Does the desktop design match? | the weighted signal panel above (one 0..100) | every build |
+| **Experiential** | Does it move like the original? | `motion-match`: capture a short motion timeline of both, compare magnitude, **timing** (same moments) and **placement** (same regions) | Forge (a static build scores 0 here, honestly) |
+| **Responsive** | Does it reflow like the original? | compare height adaptation + viewport fit across desktop / tablet / mobile | Forge (the Pencil build abstains) |
+
+The experiential axis is the honest one. An earlier richness proxy ("does the build have comparable
+motion") scored a build **87**; the frame-based match ("does it move the same way") scored that same
+build **28**, because it did the entrance and missed the original's sustained motion. The axis reports
+the lower, true number and names the gap. Motion capture today covers entrance + ambient motion;
+scroll-triggered reveals are a known next step.
+
+Both new axes are pluggable signals like any other (`signals/motion.mjs`, `signals/responsive.mjs`),
+each tagged with an `axis` so the aggregator reports it on its own instead of muddying the static score.
 
 ## Surgical critic
 
@@ -131,9 +161,9 @@ touching nothing that already matches**, so each iteration moves forward instead
 ## Run metrics: time, tokens, cost
 
 Every run writes `metrics.json` and a dashboard summary like `26m · 4.7M in / 63k out · $6.30`.
-Cost is real, not estimated: both token-consuming tools self-report (Pencil builds via `--usage`,
-the vision judge via `claude --output-format json`). Everything else (capture, the five
-deterministic signals) costs nothing.
+Cost is real, not estimated: the token-consuming tools self-report (Pencil and Forge builds via
+`--usage` / `claude --output-format json`, the vision judge likewise). Everything else (capture, the
+deterministic signals, motion-match, responsiveness) costs nothing.
 
 ## Benchmark and leaderboard
 
@@ -183,10 +213,10 @@ measure on this same benchmark.
 ## Model routing
 
 Every model the pipeline runs is selectable from one file, `models.config.json`, by
-role: `build` (the Pencil design + repair agent, the dominant cost), `readback`
-(cheap doc read-back), and `judge` (the vision signal). Pencil infers the provider
-from the model id, so the build can run on Claude, OpenAI, or Gemini. Defaults
-reproduce the verified baseline, so an untouched config changes nothing.
+role: `build` (the Pencil design + repair agent), `readback` (cheap doc read-back),
+`judge` (the vision signal), and `forge` (the code-build agent). Pencil infers the
+provider from the model id, so the build can run on Claude, OpenAI, or Gemini.
+Defaults reproduce the verified baseline, so an untouched config changes nothing.
 
 ```bash
 # one-off swap, no file edit (per-role env override)
@@ -214,19 +244,22 @@ instead of building from a wall.
 
 ```
 orchestrator.ts                  Pipeline controller (Pixel → Wireframe → Forge)
-models.config.json               Model routing: which model runs each role (build/readback/judge)
-signals.config.json              Control surface: signal toggles, weights, target
-signals/                         Pluggable fidelity signals (layout, perceptual, gist, tokens, structure, content, vision)
+models.config.json               Model routing: which model runs each role (build/readback/judge/forge)
+signals.config.json              Control surface: signal toggles, weights, target, axes
+signals/                         Pluggable signals: static (layout, perceptual, gist, tokens, structure, content, vision) + axes (motion, responsive)
 scripts/
-  extract-spec.mjs               Pixel: genuine-browser capture → spec
+  extract-spec.mjs               Pixel: genuine-browser capture (incl. motion) → spec
   evaluate-spec.mjs              Spec quality gate
   spec.schema.json               The DesignSpec contract
   spec-to-pencil-vars.mjs        Tokens → Pencil variables
-  evaluate.mjs                   The weighted signal aggregator
+  evaluate.mjs                   The aggregator: static panel + the separate axes
   critic.mjs                     Surgical repair planner
   calibrate.mjs                  Fit signal weights to human ratings (simplex, ridge, LOO)
   model-router.mjs               Turns models.config.json (+ env) into CLI model flags
-  benchmark.ts                   Run the corpus → leaderboard
+  forge.mjs                      Deterministic spec → animated HTML (the Forge fallback compiler)
+  capture-motion.mjs             Record a page's motion as an energy timeline
+  motion-match.mjs               Compare two motion timelines (magnitude / timing / placement)
+  benchmark.ts                   Run the corpus → leaderboard (three axes)
 calibration/ratings.json         Human fidelity ratings that calibrate the weights
 targets.json                     Benchmark corpus
 squad/                           Agent definitions: pixel, wireframe, forge

@@ -17,7 +17,8 @@ import path from "node:path";
 dotenv.config({ path: ".env.local" });
 
 interface Target { name: string; url?: string; image?: string; kind?: string }
-interface Row { name: string; ref: string; status?: string; overall: number | null; iteration: number | null; gates: Record<string, { score?: number }> }
+interface Forge { staticScore?: number; experiential?: number; responsive?: number }
+interface Row { name: string; ref: string; status?: string; overall: number | null; iteration: number | null; gates: Record<string, { score?: number }>; forge?: Forge }
 
 async function main() {
   const onlyArg = process.argv.find((a) => a.startsWith("--only="))?.split("=")[1];
@@ -42,9 +43,12 @@ async function main() {
     }
     const task = await client.query(api.tasks.get, { id: taskId });
     const ev = await client.query(api.evaluations.latest, { taskId });
-    rows.push({ name: t.name, ref, status: task?.status, overall: ev?.overallScore ?? null, iteration: ev?.iteration ?? null, gates: (ev?.gates as Record<string, { score?: number }>) || {} });
+    // Forge's three-axis result is written to disk (not the evaluations table).
+    let forge: Forge | undefined;
+    try { forge = JSON.parse(fs.readFileSync(path.resolve(`warloops/.mirror-specs/mirror-${taskId}/forge/result.json`), "utf-8")); } catch { /* no forge build */ }
+    rows.push({ name: t.name, ref, status: task?.status, overall: ev?.overallScore ?? null, iteration: ev?.iteration ?? null, gates: (ev?.gates as Record<string, { score?: number }>) || {}, forge });
     await client.mutation(api.tasks.cancel, { id: taskId });
-    console.log(`[bench] ${t.name}: ${ev?.overallScore ?? "n/a"}/100 (${task?.status})`);
+    console.log(`[bench] ${t.name}: wireframe ${ev?.overallScore ?? "n/a"}/100 · forge static ${forge?.staticScore ?? "n/a"} / exp ${forge?.experiential ?? "n/a"} / resp ${forge?.responsive ?? "n/a"} (${task?.status})`);
   }
 
   const outDir = path.resolve("warloops/benchmark");
@@ -60,9 +64,14 @@ async function main() {
     "",
     `_ran ${ranAt} · ${scored.length}/${rows.length} scored · mean fidelity ${avg}/100_`,
     "",
-    "| # | target | fidelity | status | per-signal |",
-    "|---|--------|----------|--------|------------|",
-    ...sorted.map((r, i) => `| ${i + 1} | ${r.name} | ${r.overall ?? "—"} | ${r.status} | ${Object.entries(r.gates).map(([k, v]) => `${k} ${v.score ?? "?"}`).join(", ")} |`),
+    "Wireframe = Pencil static mirror. Forge = code build, scored on three axes (static design / experiential motion / responsive reflow).",
+    "",
+    "| # | target | wireframe | forge static | experiential | responsive | status |",
+    "|---|--------|-----------|--------------|--------------|------------|--------|",
+    ...sorted.map((r, i) => `| ${i + 1} | ${r.name} | ${r.overall ?? "—"} | ${r.forge?.staticScore ?? "—"} | ${r.forge?.experiential ?? "—"} | ${r.forge?.responsive ?? "—"} | ${r.status} |`),
+    "",
+    "Per-signal (wireframe):",
+    ...sorted.map((r) => `- **${r.name}**: ${Object.entries(r.gates).map(([k, v]) => `${k} ${v.score ?? "?"}`).join(", ")}`),
   ].join("\n");
   fs.writeFileSync(path.join(outDir, "leaderboard.md"), md);
 
