@@ -1,15 +1,16 @@
 {
-  "_comment": "War Loops fidelity signal panel. One control surface: toggle signals, set weights (renormalized over enabled signals), tune the pass bar. Weights are relative.",
+  "_comment": "War Loops fidelity signal panel. One control surface: toggle signals, set weights (renormalized over enabled signals), tune the pass bar. Weights are relative. The current weights are calibration PRIORS; scripts/calibrate.mjs fits them against human ratings of the benchmark corpus and writes signals.config.suggested.json.",
   "targetScore": 90,
   "iterateFloor": 60,
   "maxIterations": 3,
   "models": { "judge": "claude" },
   "signals": [
-    { "name": "perceptual", "weight": 0.05, "enabled": true,  "note": "SSIM: structural similarity to the reference (non-LLM)" },
-    { "name": "gist",       "weight": 0.15, "enabled": true,  "note": "overall resemblance: low-res correlation + color histogram (non-LLM, local, no deps)" },
-    { "name": "tokens",     "weight": 0.2, "enabled": true, "note": "extracted color/type tokens vs the built .pen (deterministic)" },
-    { "name": "structure",  "weight": 0.12, "enabled": true, "note": "spec regions/order vs built layout (deterministic)" },
+    { "name": "perceptual", "weight": 0.03, "enabled": true,  "note": "SSIM: structural similarity to the reference (non-LLM). Noisy on rich pages; kept as a weak corroborator." },
+    { "name": "gist",       "weight": 0.13, "enabled": true,  "note": "overall resemblance: low-res correlation + color histogram (non-LLM, local, no deps)" },
+    { "name": "layout",     "weight": 0.13, "enabled": true,  "note": "vertical section-boundary alignment: same horizontal bands in the same positions, ref vs render (non-LLM, symmetric)" },
+    { "name": "tokens",     "weight": 0.2,  "enabled": true,  "note": "extracted color/type tokens vs the built .pen (deterministic)" },
+    { "name": "structure",  "weight": 0.06, "enabled": true,  "note": "section-count proximity + header/footer bookends (deterministic)" },
     { "name": "content",    "weight": 0.18, "enabled": true,  "note": "required_text present in the build (deterministic)" },
-    { "name": "vision",     "weight": 0.3, "enabled": true,  "note": "claude vision judge: subjective fidelity (LLM)" }
+    { "name": "vision",     "weight": 0.27, "enabled": true,  "note": "claude vision judge: subjective fidelity (LLM), one weighted voice" }
   ]
 }

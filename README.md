@@ -98,18 +98,25 @@ Memory is a first-class part of the design, all backed by Convex plus the model'
 
 ## The fidelity signal panel
 
-The heart of the system. Instead of one LLM opinion, fidelity is a **weighted blend of six signals,
-five of them non-LLM and deterministic** (so the score does not drift run to run). Pluggable: a new
+The heart of the system. Instead of one LLM opinion, fidelity is a **weighted blend of seven signals,
+six of them non-LLM and deterministic** (so the score does not drift run to run). Pluggable: a new
 signal is a file in `signals/` plus a line in `signals.config.json`.
 
 | Signal | Measures | Type |
 |--------|----------|------|
+| `layout` | section-boundary alignment: same horizontal bands in the same vertical positions, ref vs render | non-LLM |
 | `perceptual` | SSIM, structural similarity to the reference | non-LLM |
 | `gist` | overall resemblance (low-res correlation + color histogram) | non-LLM |
 | `tokens` | extracted colors/fonts applied in the build | non-LLM |
 | `structure` | section-count proximity + header/footer bookends (region names are unreliable, so no name-matching) | non-LLM |
 | `content` | required text shipped in the build | non-LLM |
 | `vision` | subjective fidelity (layout, color, hierarchy) | `claude` judge, one weighted voice |
+
+`layout` is the geometry grounding: it segments both the original and the build into horizontal
+bands the same way (from the row-wise color-derivative profile, so it catches whitespace gaps and
+full-bleed color blocks alike) and scores how well the band counts and positions line up. It closes
+the blind spot `perceptual` (whole-frame SSIM) and the name-free `structure` signal both miss:
+**right content, wrong vertical positions.**
 
 Each signal returns a 0..100 score plus findings; the aggregator (`scripts/evaluate.mjs`) blends a
 weighted overall, a decision, and merged findings. Signals abstain gracefully if unavailable, so the
@@ -139,10 +146,26 @@ calibrated** so the overall tracks human judgment.
 npx tsx scripts/benchmark.ts --only=tailwind,vercel,linear
 ```
 
+### Calibrating the weights (not eyeballing them)
+
+The weights in `signals.config.json` are **priors**, fit against human judgment rather than guessed.
+`scripts/calibrate.mjs` takes the benchmark's per-signal scores plus a small file of human fidelity
+ratings (`calibration/ratings.json`, one 0..100 per target) and fits non-negative weights on the
+probability simplex (they sum to 1) that best predict the human rating, ridge-regularized toward the
+current priors so it degrades gracefully on thin data. It reports in-sample and **leave-one-out**
+Pearson correlation, warns when the labeled corpus is too small to trust (rule of thumb: want at
+least twice as many rated targets as signals), and writes `signals.config.suggested.json` for review
+rather than overwriting the live config.
+
+```bash
+node scripts/calibrate.mjs --report benchmark/report.json --ratings calibration/ratings.json
+```
+
 ### First run (real, measured)
 
 All three captured cleanly (no bot-wall). Cost is self-reported by the tools, not estimated. Full
-breakdown in [`docs/benchmark-run.md`](docs/benchmark-run.md).
+breakdown in [`docs/benchmark-run.md`](docs/benchmark-run.md). These numbers reflect the six-signal
+panel; the `layout` signal and recalibrated weights land in the next corpus run.
 
 | target | fidelity | total cost | of which build | wall time |
 |--------|----------|------------|----------------|-----------|
@@ -174,7 +197,7 @@ instead of building from a wall.
 ```
 orchestrator.ts                  Pipeline controller (Pixel → Wireframe → Forge)
 signals.config.json              Control surface: signal toggles, weights, target
-signals/                         Pluggable fidelity signals (perceptual, gist, tokens, structure, content, vision)
+signals/                         Pluggable fidelity signals (layout, perceptual, gist, tokens, structure, content, vision)
 scripts/
   extract-spec.mjs               Pixel: genuine-browser capture → spec
   evaluate-spec.mjs              Spec quality gate
@@ -182,7 +205,9 @@ scripts/
   spec-to-pencil-vars.mjs        Tokens → Pencil variables
   evaluate.mjs                   The weighted signal aggregator
   critic.mjs                     Surgical repair planner
+  calibrate.mjs                  Fit signal weights to human ratings (simplex, ridge, LOO)
   benchmark.ts                   Run the corpus → leaderboard
+calibration/ratings.json         Human fidelity ratings that calibrate the weights
 targets.json                     Benchmark corpus
 squad/                           Agent definitions: pixel, wireframe, forge
 skill/frontend-spec-extractor/   Claude skill wrapping the extractor + gate

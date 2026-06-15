@@ -4,3 +4,7 @@ node_modules/
 .DS_Store
 benchmark/
 .mirror-specs/
+
+# calibration: generated suggestion + personal ratings
+signals.config.suggested.json
+calibration/ratings.json

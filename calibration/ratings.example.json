@@ -1,0 +1,4 @@
+{
+  "_comment": "Human fidelity ratings, 0..100, keyed by benchmark target name. One number per target: how faithful is the build to the original, by your eye. Copy to ratings.json and fill in. The calibrator fits signal weights so the panel's overall tracks these.",
+  "ratings": { "tailwind": 0, "vercel": 0, "linear": 0 }
+}
