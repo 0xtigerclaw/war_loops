@@ -240,9 +240,20 @@ const BUILT_REPORT = [
 ];
 
 // Pull the build agent's reported {variables, regions, texts} out of stdout.
+// The agent is asked to emit a fenced json block; parse those first (most
+// reliable), then fall back to scanning every balanced {...} object. Prefer the
+// candidate that carries the MOST of the three expected keys, so a small stray
+// object (e.g. a tool arg) never wins over the real report.
 function extractBuilt(stdout: string): { variables?: Record<string, unknown>; regions?: string[]; texts?: string[] } | null {
+  const candidates: string[] = [];
+  // 1. fenced ```json ... ``` (or bare ```) blocks, last-first
+  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let fm: RegExpExecArray | null;
+  while ((fm = fenceRe.exec(stdout)) !== null) candidates.push(fm[1].trim());
+  candidates.reverse();
+  // 2. every balanced top-level object
   let depth = 0, start = -1, inStr = false, esc = false;
-  const objs = [];
+  const objs: string[] = [];
   for (let i = 0; i < stdout.length; i++) {
     const c = stdout[i];
     if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
@@ -250,10 +261,19 @@ function extractBuilt(stdout: string): { variables?: Record<string, unknown>; re
     else if (c === "{") { if (depth === 0) start = i; depth++; }
     else if (c === "}" && depth > 0) { depth--; if (depth === 0 && start >= 0) { objs.push(stdout.slice(start, i + 1)); start = -1; } }
   }
-  for (let i = objs.length - 1; i >= 0; i--) {
-    try { const p = JSON.parse(objs[i]); if (p && (p.variables || p.regions || p.texts)) return p; } catch { /* keep */ }
+  for (let i = objs.length - 1; i >= 0; i--) candidates.push(objs[i]);
+
+  let best: { variables?: Record<string, unknown>; regions?: string[]; texts?: string[] } | null = null;
+  let bestKeys = 0;
+  for (const raw of candidates) {
+    try {
+      const p = JSON.parse(raw);
+      if (!p || typeof p !== "object") continue;
+      const keys = (p.variables ? 1 : 0) + (Array.isArray(p.regions) ? 1 : 0) + (Array.isArray(p.texts) ? 1 : 0);
+      if (keys > bestKeys) { best = p; bestKeys = keys; if (keys === 3) return best; }
+    } catch { /* keep scanning */ }
   }
-  return null;
+  return best;
 }
 
 const READBACK_PROMPT = 'Do not change the design at all. Read the current document with get_variables and snapshot_layout, then output ONLY a fenced json block (nothing else): { "variables": { "<name>": <value> }, "regions": ["<section names, top to bottom>"], "texts": ["<every visible text string>"] }';
@@ -262,15 +282,18 @@ const READBACK_PROMPT = 'Do not change the design at all. Read the current docum
 // (common on the heavy initial build), do a cheap read-back pass to extract it.
 async function ensureBuilt(stdout: string, penPath: string, builtPath: string): Promise<void> {
   let built = extractBuilt(stdout);
-  if (!built) {
-    const rbUsage = path.join(path.dirname(builtPath), "usage", "readback.json");
+  // Read-back fallback, retried once: content/structure/tokens all abstain if
+  // built.json is missing, so a single flaky reply must not lose it silently.
+  const { pencilModelArgs } = await import("./scripts/model-router.mjs");
+  for (let attempt = 0; !built && attempt < 2; attempt++) {
+    const rbUsage = path.join(path.dirname(builtPath), "usage", `readback${attempt ? "-" + attempt : ""}.json`);
     fs.mkdirSync(path.dirname(rbUsage), { recursive: true });
-    const { pencilModelArgs } = await import("./scripts/model-router.mjs");
     const rb = await runPencilCli(["--in", penPath, "--out", path.join(path.dirname(builtPath), "_readback.pen"), "--prompt", READBACK_PROMPT, ...pencilModelArgs("readback"), "--usage", rbUsage], 5 * 60 * 1000);
     built = extractBuilt(rb.stdout);
-    recordCall("readback", readPencilUsage(rbUsage));
+    recordCall(`readback${attempt ? "." + attempt : ""}`, readPencilUsage(rbUsage));
   }
   if (built) fs.writeFileSync(builtPath, JSON.stringify(built, null, 2));
+  else console.error(`[orchestrator] WARNING: built.json could not be extracted; content/structure/tokens signals will abstain for ${path.basename(path.dirname(builtPath))}`);
 }
 
 // ---- run metrics: time, tokens, cost ----

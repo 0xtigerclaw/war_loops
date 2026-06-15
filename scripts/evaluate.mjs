@@ -71,10 +71,20 @@ async function main() {
     return acc;
   }, { inputTokens: 0, outputTokens: 0, costUsd: 0 });
 
+  // Coverage: a good measure names its own gaps. If signals abstained, the
+  // overall is a blend of fewer voices and must not pass as a confident score.
+  const enabled = signals.map((s) => s.name);
+  const scored = new Set(results.map((r) => r.name));
+  const abstained = enabled.filter((n) => !scored.has(n));
+  const coverage = +(scored.size / (enabled.length || 1)).toFixed(2);
+  const confidence = coverage >= 0.85 ? "ok" : coverage >= 0.6 ? "reduced" : "low";
+
   const out = {
     decision,
     overallScore: overall,
     target,
+    confidence,
+    coverage: { scored: scored.size, enabled: enabled.length, abstained },
     signals: results.map((r) => ({ name: r.name, score: r.score, weight: +(r.weight / totalW).toFixed(3), detail: r.detail })),
     findings,
     usage,
@@ -84,7 +94,9 @@ async function main() {
     console.log(JSON.stringify(out, null, 2));
   } else {
     const icon = { pass: "✅", iterate: "🔁", fail: "❌" }[decision] || "•";
-    console.log(`\n${icon}  FIDELITY ${decision.toUpperCase()} — ${overall}/100 (target ${target})\n`);
+    console.log(`\n${icon}  FIDELITY ${decision.toUpperCase()} — ${overall}/100 (target ${target})`);
+    if (confidence !== "ok") console.log(`  ⚠  ${confidence.toUpperCase()} CONFIDENCE: ${abstained.length} signal(s) abstained [${abstained.join(", ")}] — coverage ${coverage}`);
+    console.log("");
     for (const r of out.signals) console.log(`  ${r.name.padEnd(12)} ${String(r.score).padStart(3)}  · w ${r.weight}   ${r.detail}`);
     if (findings.length) {
       console.log(`\n  Findings (${findings.length}):`);
