@@ -10,6 +10,7 @@ const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL!;
 const MAX_SPEC_ATTEMPTS = 3;
 const WIREFRAME_TIMEOUT_MS = 12 * 60 * 1000;
 const MAX_WIREFRAME_ITERATIONS = 3;
+const MAX_FORGE_ITERATIONS = 3;
 
 interface DesignSpec {
   source_type: "url" | "image";
@@ -238,6 +239,7 @@ function runPencilCli(args: string[], timeoutMs: number): Promise<{ code: number
 }
 
 interface WireframeResult { penPath: string; exportPath?: string; previewPath?: string; score?: number; decision?: string; iterations: number }
+interface ForgeEval { decision: "pass" | "iterate" | "fail"; overallScore: number; signals: Array<{ name: string; score: number; detail: string }>; axes?: Array<{ name: string; score: number }>; findings: Array<{ severity?: string; area?: string; observed?: string; fix?: string; signal?: string }> }
 interface WireframeEval { decision: "pass" | "iterate" | "fail"; overallScore: number; signals: Array<{ name: string; score: number; weight: number; detail: string }>; findings: Array<{ severity: string; area: string; observed: string; fix: string; signal?: string }>; usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number } }
 
 // Appended to every build prompt: the agent reads the document back and reports
@@ -538,6 +540,7 @@ function buildForgePrompt(spec: DesignSpec, basePath: string, originalPath: stri
   const m = (spec as unknown as { motion?: { summary?: Record<string, unknown>; scroll_reveal?: { mechanism?: string }; keyframes?: Array<{ name: string }> } }).motion || {};
   const s = m.summary || {};
   const colors = spec.tokens?.colors || {};
+  const texts = (spec.content?.required_text || []).slice(0, 50);
   const brief: string[] = [];
   if (s.has_scroll_reveal) brief.push(`- Scroll-reveal: sections fade/slide in as they enter the viewport (IntersectionObserver). In the original: ${m.scroll_reveal?.mechanism || "detected"}.`);
   if (s.has_infinite) brief.push("- Ambient motion: at least one element loops continuously (e.g. a floating or pulsing hero accent).");
@@ -557,6 +560,9 @@ function buildForgePrompt(spec: DesignSpec, basePath: string, originalPath: stri
     "ADD THESE MOTIONS/EFFECTS (the point of this stage - the base is static, make it move like the original):",
     ...(brief.length ? brief : ["- Tasteful entrance + hover micro-interactions consistent with the design."]),
     "",
+    "CONTENT - the page MUST include every one of these exact text strings, VERBATIM (do not paraphrase, summarize, or drop any; place each where it belongs in the layout):",
+    ...texts.map((t) => `  - ${JSON.stringify(t)}`),
+    "",
     "REQUIREMENTS:",
     "- One self-contained file: inline <style> + a small inline <script>. No external deps, no frameworks, no build step.",
     "- Faithful to the BASE design first; motion is layered on top, never at the cost of the layout.",
@@ -565,6 +571,30 @@ function buildForgePrompt(spec: DesignSpec, basePath: string, originalPath: stri
     "",
     `Use your Write tool to save the finished page to EXACTLY this path: ${outPath}`,
     "Write only that one file. Do not print the HTML in your reply.",
+  ].join("\n");
+}
+
+// Forge repair prompt: surgically fix the weakest static signals without
+// rebuilding, preserving the layout and motion that already work.
+function buildForgeRepairPrompt(spec: DesignSpec, ev: ForgeEval, outPath: string, basePath: string): string {
+  const texts = (spec.content?.required_text || []).slice(0, 50);
+  const weakest = [...(ev.signals || [])].sort((a, b) => a.score - b.score).slice(0, 3);
+  const weakNames = new Set(weakest.map((w) => w.name));
+  const findings = (ev.findings || []).filter((f) => !f.signal || weakNames.has(f.signal)).slice(0, 8);
+  return [
+    "You are Forge, refining a page you already generated. Do NOT rebuild from scratch.",
+    `Read the current page with your Read tool: ${outPath}`,
+    `It scored ${ev.overallScore}/100 on static fidelity. Read the BASE design again: ${basePath}`,
+    "",
+    `Fix ONLY these weakest aspects (${weakest.map((w) => `${w.name} ${w.score}`).join(", ")}); keep everything that already works, especially the layout and ALL motion:`,
+    ...(findings.length ? findings.map((f) => `  - [${f.signal || f.area}] ${f.observed} -> ${f.fix}`) : ["  - Tighten visual match to the base (spacing, color, type scale)."]),
+    "",
+    "If content scored low, the page is missing required text. It MUST contain every one of these strings VERBATIM:",
+    ...texts.map((t) => `  - ${JSON.stringify(t)}`),
+    "",
+    "Keep it one self-contained file, responsive, with the motion intact (scroll-reveal, ambient, transitions).",
+    `Re-save to EXACTLY the same path with your Write or Edit tool: ${outPath}`,
+    "Write only that file. Do not print the HTML.",
   ].join("\n");
 }
 
@@ -578,87 +608,94 @@ async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: 
   const forgeDir = path.join(specDir, "forge");
   fs.mkdirSync(forgeDir, { recursive: true });
   const indexHtml = path.join(forgeDir, "index.html");
+  const bestPath = path.join(forgeDir, "index.best.html");
   const baseRender = path.join(specDir, "wireframe.png");          // Pencil build = visual base
   const originalRef = path.join(specDir, "screenshots", "desktop.png"); // original = motion reference
-  console.log(`[MIRROR] Forge reproducing the Pencil wireframe in code + adding the original's motion`);
-  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "action", content: "Reproducing the Pencil wireframe in code and layering on the original's motion" });
-
-  // 1. LLM codegen from the Pencil base + motion spec; deterministic compiler as fallback.
-  const { claudeModelArgs } = await import("./scripts/model-router.mjs");
-  const tGen = Date.now();
   const base = fs.existsSync(baseRender) ? baseRender : originalRef;
-  const gen = await runClaudeCli(buildForgePrompt(handoff.spec, base, originalRef, indexHtml), claudeModelArgs("forge"), 10 * 60 * 1000);
-  recordStage("forge.codegen", tGen);
-  try { const env = JSON.parse(gen.stdout); const u = env.usage || {}; recordCall("forge.codegen", { inputTokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), outputTokens: u.output_tokens || 0, costUsd: env.total_cost_usd || 0 }); } catch { /* no usage */ }
-
-  if (!fs.existsSync(indexHtml)) {
-    await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "log", content: "Codegen produced no file; falling back to the deterministic compiler" });
-    const fb = await runNode("warloops/scripts/forge.mjs", [handoff.specPath, "--out", forgeDir]);
-    if (fb.code !== 0 || !fs.existsSync(indexHtml)) {
-      await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "error", content: `Forge failed (codegen + fallback): ${(fb.stderr || fb.stdout).slice(-300)}` });
-      return;
-    }
-  }
-
-  // 2. render the forge build + capture its own motion (headless; local file, no bot wall).
-  // --scroll so reveal sections are visible in the screenshot; scroll-reveal is still
-  // detected via the class marker.
   const recapDir = path.join(forgeDir, "recap");
-  const tRender = Date.now();
-  await runNode("warloops/scripts/extract-spec.mjs", ["--url", pathToFileURL(indexHtml).href, "--out", recapDir, "--headless", "--scroll"]);
-  recordStage("forge.render", tRender);
   const forgeSpec = path.join(recapDir, "spec.json");
   const forgeRender = path.join(recapDir, "screenshots", "desktop.png");
+  const forgeBuilt = path.join(forgeDir, "built.json");
+  const { claudeModelArgs } = await import("./scripts/model-router.mjs");
+  console.log(`[MIRROR] Forge reproducing the Pencil wireframe in code + adding the original's motion`);
 
-  // Synthesize a built.json from the forge build's OWN captured spec, so the
-  // deterministic content/structure/tokens signals can score it (they read a
-  // built.json; the Pencil stage gets one from the .pen read-back, the HTML build
-  // gets one from its re-capture). Without this they abstain and static looks
-  // unfairly low.
-  let forgeBuilt: string | undefined;
-  try {
-    const rspec = JSON.parse(fs.readFileSync(forgeSpec, "utf-8"));
-    const variables: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(rspec.tokens?.colors || {})) variables[`color_${k}`] = v;
-    let fi = 0;
-    for (const t of Object.values(rspec.tokens?.typography || {})) variables[`type_${fi++}`] = (t as { family?: string }).family || "";
-    const built = {
-      regions: (rspec.layout?.regions || []).map((r: { name?: string; role?: string }) => r.name || r.role).filter(Boolean),
-      texts: rspec.content?.required_text || [],
-      variables,
-    };
-    forgeBuilt = path.join(forgeDir, "built.json");
-    fs.writeFileSync(forgeBuilt, JSON.stringify(built, null, 2));
-  } catch { /* no synthesized built */ }
-
-  // 3. score: static fidelity of the forge build + the experiential (motion) axis.
-  const refPath = path.join(specDir, "screenshots", "desktop.png");
-  let staticScore: number | undefined;
-  let experiential: number | undefined;
-  if (fs.existsSync(refPath) && fs.existsSync(forgeRender)) {
-    const evalArgs = ["--reference", refPath, "--render", forgeRender, "--spec", handoff.specPath, "--json"];
-    if (forgeBuilt && fs.existsSync(forgeBuilt)) evalArgs.push("--built", forgeBuilt);
+  // Render the current index.html, synthesize a built.json from its own re-capture
+  // (so content/structure/tokens score it instead of abstaining), and run the panel.
+  const renderAndScore = async (iter: number): Promise<ForgeEval | null> => {
+    const tRender = Date.now();
+    await runNode("warloops/scripts/extract-spec.mjs", ["--url", pathToFileURL(indexHtml).href, "--out", recapDir, "--headless", "--scroll"]);
+    recordStage(`forge.render.${iter}`, tRender);
+    if (!fs.existsSync(originalRef) || !fs.existsSync(forgeRender)) return null;
+    try {
+      const rspec = JSON.parse(fs.readFileSync(forgeSpec, "utf-8"));
+      const variables: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(rspec.tokens?.colors || {})) variables[`color_${k}`] = v;
+      let fi = 0;
+      for (const t of Object.values(rspec.tokens?.typography || {})) variables[`type_${fi++}`] = (t as { family?: string }).family || "";
+      const built = { regions: (rspec.layout?.regions || []).map((r: { name?: string; role?: string }) => r.name || r.role).filter(Boolean), texts: rspec.content?.required_text || [], variables };
+      fs.writeFileSync(forgeBuilt, JSON.stringify(built, null, 2));
+    } catch { /* no synthesized built */ }
+    const evalArgs = ["--reference", originalRef, "--render", forgeRender, "--spec", handoff.specPath, "--json"];
+    if (fs.existsSync(forgeBuilt)) evalArgs.push("--built", forgeBuilt);
     if (fs.existsSync(forgeSpec)) evalArgs.push("--build-motion", forgeSpec);
     const evRun = await runNode("warloops/scripts/evaluate.mjs", evalArgs);
-    try {
-      const ev = JSON.parse(evRun.stdout);
-      staticScore = ev.overallScore;
-      experiential = (ev.axes || []).find((a: { name: string; score: number }) => a.name === "motion")?.score;
-    } catch { /* leave undefined */ }
+    try { return JSON.parse(evRun.stdout) as ForgeEval; } catch { return null; }
+  };
+
+  // Build -> render -> score -> surgically repair the weakest signals, keeping the
+  // best build (a repair that regresses must not ship).
+  let lastEval: ForgeEval | null = null, bestEval: ForgeEval | null = null;
+  let bestScore = -1, prevScore = -1, iterations = 0;
+
+  for (let iter = 0; iter < MAX_FORGE_ITERATIONS; iter++) {
+    iterations = iter + 1;
+    const isRepair = iter > 0 && lastEval != null;
+    await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "action", content: isRepair ? `Forge repair iteration ${iter} (static ${lastEval!.overallScore}/100)` : "Reproducing the Pencil wireframe in code and layering on the original's motion" });
+
+    const prompt = isRepair ? buildForgeRepairPrompt(handoff.spec, lastEval!, indexHtml, base) : buildForgePrompt(handoff.spec, base, originalRef, indexHtml);
+    const tGen = Date.now();
+    const gen = await runClaudeCli(prompt, claudeModelArgs("forge"), 10 * 60 * 1000);
+    recordStage(`forge.codegen.${iter}`, tGen);
+    try { const env = JSON.parse(gen.stdout); const u = env.usage || {}; recordCall(`forge.codegen.${iter}`, { inputTokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), outputTokens: u.output_tokens || 0, costUsd: env.total_cost_usd || 0 }); } catch { /* no usage */ }
+
+    if (!fs.existsSync(indexHtml)) {
+      if (iter === 0) {
+        await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "log", content: "Codegen produced no file; falling back to the deterministic compiler" });
+        const fb = await runNode("warloops/scripts/forge.mjs", [handoff.specPath, "--out", forgeDir]);
+        if (fb.code !== 0 || !fs.existsSync(indexHtml)) { await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "error", content: `Forge failed (codegen + fallback): ${(fb.stderr || fb.stdout).slice(-300)}` }); return; }
+      } else break; // a repair pass produced nothing; keep the best so far
+    }
+
+    const ev = await renderAndScore(iter);
+    if (!ev) break;
+    lastEval = ev;
+    const exp = (ev.axes || []).find((a) => a.name === "motion")?.score;
+    if (ev.overallScore > bestScore) { bestScore = ev.overallScore; bestEval = ev; try { fs.copyFileSync(indexHtml, bestPath); } catch { /* ignore */ } }
+    await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "log", content: `Forge static ${ev.overallScore}/100 (${ev.decision}), experiential ${exp ?? "?"}/100` });
+
+    if (ev.decision === "pass") break;
+    if (iter > 0 && ev.overallScore - prevScore < 5) break; // stagnation: stop spending
+    prevScore = ev.overallScore;
   }
 
-  const result = { html: indexHtml, render: fs.existsSync(forgeRender) ? forgeRender : undefined, staticScore, experiential };
+  // Ship the best build, not necessarily the last.
+  if (fs.existsSync(bestPath)) { try { fs.copyFileSync(bestPath, indexHtml); fs.unlinkSync(bestPath); } catch { /* ignore */ } }
+  const finalEval = bestEval || lastEval;
+  const staticScore = finalEval?.overallScore;
+  const experiential = (finalEval?.axes || []).find((a) => a.name === "motion")?.score;
+
+  const result = { html: indexHtml, render: fs.existsSync(forgeRender) ? forgeRender : undefined, staticScore, experiential, iterations };
   try { fs.writeFileSync(path.join(forgeDir, "result.json"), JSON.stringify(result, null, 2)); } catch { /* ignore */ }
 
-  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "success", content: `Moving build ready - static ${staticScore ?? "?"}/100, experiential ${experiential ?? "?"}/100` });
+  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "success", content: `Moving build ready - static ${staticScore ?? "?"}/100, experiential ${experiential ?? "?"}/100 (${iterations} iter)` });
   await client.mutation(api.tasks.appendOutput, {
     id,
-    title: `Forge - moving build (static ${staticScore ?? "?"} / experiential ${experiential ?? "?"})`,
+    title: `Forge - moving build (static ${staticScore ?? "?"} / experiential ${experiential ?? "?"}, ${iterations} iter)`,
     content:
       "**Reproduced the Pencil wireframe in code and layered on the original's motion (self-contained animated HTML).**\n" +
       `**Open it (it moves):** \`open "${indexHtml}"\`\n` +
       (result.render ? `**Render:** ${result.render}\n` : "") +
-      `**Static fidelity:** ${staticScore ?? "?"}/100   **Experiential (motion):** ${experiential ?? "?"}/100\n` +
+      `**Static fidelity:** ${staticScore ?? "?"}/100   **Experiential (motion):** ${experiential ?? "?"}/100  over ${iterations} iteration(s)\n` +
       "Forge carries the motion (scroll-reveal, ambient, transitions) the static Pencil build cannot.",
     agent: "Forge",
   });
