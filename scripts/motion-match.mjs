@@ -62,7 +62,7 @@ export function compareMotion(ref, build) {
   if (ref.scrollReveal && build.scrollReveal && rSR >= SR_FLOOR) {
     const srMag = Math.min(rSR, bSR) / Math.max(rSR, bSR);
     const srTemporal = Math.max(0, pearson(ref.scrollReveal.energy || [], build.scrollReveal.energy || []));
-    srParts.srMag = +srMag.toFixed(2); srParts.srTemporal = +srTemporal.toFixed(2);
+    srParts.srMag = +srMag.toFixed(2); srParts.srTemporal = +srTemporal.toFixed(2); srParts.srOver = bSR > rSR;
     srScore = Math.round(100 * (0.65 * srMag + 0.35 * srTemporal));
   } else {
     rSR = 0; // not scored: do not let it into the weighted blend
