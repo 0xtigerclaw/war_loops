@@ -12,6 +12,7 @@
 // buildMotionPath; absent => static build => the score is the unmet experiential
 // demand.
 import fs from "node:fs";
+import { compareMotion } from "../scripts/motion-match.mjs";
 
 export const name = "motion";
 export const axis = "experiential"; // partitioned out of the weighted static overall
@@ -39,7 +40,23 @@ function supplyOf(ref, build) {
     + Math.min(20, Math.min(ref.kf, build.kf) * 0.5);
 }
 
-export async function score({ specPath, buildMotionPath }) {
+export async function score({ specPath, buildMotionPath, refMotionTimeline, buildMotionTimeline }) {
+  // PREFERRED: a real frame-based motion-match (same moments, same places) when
+  // both the reference and the build have a captured motion timeline. This is the
+  // honest signal; the richness proxy below is the fallback when timelines are absent.
+  if (refMotionTimeline && buildMotionTimeline && fs.existsSync(refMotionTimeline) && fs.existsSync(buildMotionTimeline)) {
+    try {
+      const refTL = JSON.parse(fs.readFileSync(refMotionTimeline, "utf-8"));
+      const buildTL = JSON.parse(fs.readFileSync(buildMotionTimeline, "utf-8"));
+      const r = compareMotion(refTL, buildTL);
+      const findings = [];
+      if (r.parts.mag != null && r.parts.mag < 0.6) findings.push({ severity: "P1", area: "motion", observed: `Build moves about ${Math.round(r.parts.mag * 100)}% as much as the original`, fix: "Add the missing entrance/ambient motion" });
+      if (r.parts.temporal != null && r.parts.temporal < 0.5) findings.push({ severity: "P1", area: "motion", observed: "Motion happens at different moments than the original (e.g. one-shot entrance vs sustained/ambient)", fix: "Match the original's motion timing, including any continuous/ambient motion" });
+      if (r.parts.spatial != null && r.parts.spatial < 0.5) findings.push({ severity: "P2", area: "motion", observed: "Motion is concentrated in different regions than the original", fix: "Animate the same areas the original animates" });
+      return { score: r.score, axis, detail: `frame-match ${r.detail}`, findings };
+    } catch { /* fall through to the richness proxy */ }
+  }
+
   if (!specPath || !fs.existsSync(specPath)) return null;
   let spec; try { spec = JSON.parse(fs.readFileSync(specPath, "utf-8")); } catch { return null; }
   if (!spec.motion) return null; // spec predates motion capture: abstain

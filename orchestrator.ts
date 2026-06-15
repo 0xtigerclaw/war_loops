@@ -619,13 +619,30 @@ async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: 
   const { claudeModelArgs } = await import("./scripts/model-router.mjs");
   console.log(`[MIRROR] Forge reproducing the Pencil wireframe in code + adding the original's motion`);
 
+  // Capture the reference's motion timeline once (entrance + ambient), for the real
+  // frame-based motion-match. URL sources only; image mode has no live motion.
+  const refMotionDir = path.join(forgeDir, "motion-ref");
+  const buildMotionDir = path.join(forgeDir, "motion-build");
+  const buildMotionTL = path.join(buildMotionDir, "motion-frames.json");
+  let refMotionTL: string | undefined;
+  if (handoff.spec.source_type === "url" || /^https?:\/\//.test(handoff.spec.source_ref)) {
+    const tRefM = Date.now();
+    await runNode("warloops/scripts/capture-motion.mjs", ["--url", handoff.spec.source_ref, "--out", refMotionDir, ...(process.env.WARLOOPS_CDP ? ["--cdp", process.env.WARLOOPS_CDP] : [])]);
+    recordStage("forge.motion-ref", tRefM);
+    if (fs.existsSync(path.join(refMotionDir, "motion-frames.json"))) refMotionTL = path.join(refMotionDir, "motion-frames.json");
+  }
+
   // Render the current index.html, synthesize a built.json from its own re-capture
-  // (so content/structure/tokens score it instead of abstaining), and run the panel.
+  // (so content/structure/tokens score it instead of abstaining), capture the build's
+  // motion timeline, and run the panel.
   const renderAndScore = async (iter: number): Promise<ForgeEval | null> => {
     const tRender = Date.now();
     await runNode("warloops/scripts/extract-spec.mjs", ["--url", pathToFileURL(indexHtml).href, "--out", recapDir, "--headless", "--scroll"]);
     recordStage(`forge.render.${iter}`, tRender);
     if (!fs.existsSync(originalRef) || !fs.existsSync(forgeRender)) return null;
+    const tBM = Date.now();
+    await runNode("warloops/scripts/capture-motion.mjs", ["--url", pathToFileURL(indexHtml).href, "--out", buildMotionDir, "--headless"]);
+    recordStage(`forge.motion-build.${iter}`, tBM);
     try {
       const rspec = JSON.parse(fs.readFileSync(forgeSpec, "utf-8"));
       const variables: Record<string, unknown> = {};
@@ -637,7 +654,9 @@ async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: 
     } catch { /* no synthesized built */ }
     const evalArgs = ["--reference", originalRef, "--render", forgeRender, "--spec", handoff.specPath, "--json"];
     if (fs.existsSync(forgeBuilt)) evalArgs.push("--built", forgeBuilt);
-    if (fs.existsSync(forgeSpec)) evalArgs.push("--build-motion", forgeSpec);
+    if (fs.existsSync(forgeSpec)) evalArgs.push("--build-motion", forgeSpec); // richness proxy fallback
+    if (refMotionTL) evalArgs.push("--ref-motion", refMotionTL);              // real motion-match
+    if (fs.existsSync(buildMotionTL)) evalArgs.push("--build-motion-timeline", buildMotionTL);
     const evRun = await runNode("warloops/scripts/evaluate.mjs", evalArgs);
     try { return JSON.parse(evRun.stdout) as ForgeEval; } catch { return null; }
   };
