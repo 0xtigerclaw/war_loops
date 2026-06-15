@@ -146,8 +146,10 @@ blends them** - a build can be a faithful still and still feel dead, and the num
 The experiential axis is the honest one. An earlier richness proxy ("does the build have comparable
 motion") scored a build **87**; the frame-based match ("does it move the same way") scored that same
 build **28**, because it did the entrance and missed the original's sustained motion. The axis reports
-the lower, true number and names the gap. Motion capture today covers entrance + ambient motion;
-scroll-triggered reveals are a known next step.
+the lower, true number and names the gap. Motion is captured by **CDP screencast** (the browser
+streams every rendered frame), so entrance, ambient, and **scroll-reveal** animations are all caught
+frame-by-frame, including fast reveals that fixed-interval screenshots miss. The match scores
+magnitude, timing, and placement, and flags over- as well as under-animation.
 
 Both new axes are pluggable signals like any other (`signals/motion.mjs`, `signals/responsive.mjs`),
 each tagged with an `axis` so the aggregator reports it on its own instead of muddying the static score.
