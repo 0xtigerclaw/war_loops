@@ -45,20 +45,16 @@ export async function runFrontendMirrorPipeline(taskId: string) {
   const tWf = Date.now();
   const wireframe = await runWireframeStage(client, id, taskId, handoff);
   recordStage("wireframe", tWf);
+  if (!wireframe) { await writeMetrics(client, id, handoff.specDir); return; } // failPipeline already invoked
+
+  // Step 3: Forge - compile the verified spec into a moving HTML build. The code
+  // output stage Pencil cannot be: it reproduces the captured motion, so the
+  // clone actually moves and we can score the experiential axis. Non-fatal.
+  const tForge = Date.now();
+  await runForgeStage(client, id, taskId, handoff);
+  recordStage("forge", tForge);
+
   await writeMetrics(client, id, handoff.specDir);
-  if (!wireframe) return; // failPipeline already invoked
-
-  // Step 3: Forge - Build production frontend
-  console.log(`[MIRROR] Forge building production frontend`);
-  await client.mutation(api.agents.logActivity, {
-    agentName: "Forge",
-    type: "action",
-    content: `Building production React + Tailwind frontend from verified wireframe`,
-  });
-
-  // Forge agent runs here via Claude Code context
-  // Reads: wireframe screenshot, layout snapshot, design tokens, Pixel spec
-  // Outputs: React + Tailwind code to output/mirror-{taskId}/
 
   // Step 4: Handoff to review
   await client.mutation(api.tasks.updateStatus, { id, status: "review" });
@@ -519,6 +515,67 @@ async function runWireframeStage(
   await client.mutation(api.agents.logActivity, { agentName: "Wireframe", type: "success", content: `Wireframe ${result.decision ?? "built"} (${result.score ?? "?"}/100)` });
 
   return result;
+}
+
+// Step 3 producer: Forge. Deterministically compile the verified spec into a
+// self-contained, MOVING HTML build (no LLM, no tokens), then render it and score
+// it - the static fidelity of the code build plus the experiential (motion) axis
+// that the static Pencil wireframe scores 0 on. Non-fatal: a Forge failure leaves
+// the Pencil wireframe standing.
+async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: string, handoff: SpecHandoff): Promise<void> {
+  const specDir = handoff.specDir;
+  const forgeDir = path.join(specDir, "forge");
+  console.log(`[MIRROR] Forge compiling spec -> moving HTML`);
+  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "action", content: "Compiling the verified spec into a moving HTML build (static + motion)" });
+
+  // 1. spec -> moving HTML
+  const forgeRun = await runNode("warloops/scripts/forge.mjs", [handoff.specPath, "--out", forgeDir]);
+  const indexHtml = path.join(forgeDir, "index.html");
+  if (forgeRun.code !== 0 || !fs.existsSync(indexHtml)) {
+    await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "error", content: `Forge compile failed: ${(forgeRun.stderr || forgeRun.stdout).slice(-300)}` });
+    return;
+  }
+
+  // 2. render the forge build + capture its own motion (headless; local file, no bot wall).
+  // --scroll so reveal sections are visible in the screenshot; scroll-reveal is still
+  // detected via the class marker.
+  const recapDir = path.join(forgeDir, "recap");
+  const tRender = Date.now();
+  await runNode("warloops/scripts/extract-spec.mjs", ["--url", pathToFileURL(indexHtml).href, "--out", recapDir, "--headless", "--scroll"]);
+  recordStage("forge.render", tRender);
+  const forgeSpec = path.join(recapDir, "spec.json");
+  const forgeRender = path.join(recapDir, "screenshots", "desktop.png");
+
+  // 3. score: static fidelity of the forge build + the experiential (motion) axis.
+  const refPath = path.join(specDir, "screenshots", "desktop.png");
+  let staticScore: number | undefined;
+  let experiential: number | undefined;
+  if (fs.existsSync(refPath) && fs.existsSync(forgeRender)) {
+    const evalArgs = ["--reference", refPath, "--render", forgeRender, "--spec", handoff.specPath, "--json"];
+    if (fs.existsSync(forgeSpec)) evalArgs.push("--build-motion", forgeSpec);
+    const evRun = await runNode("warloops/scripts/evaluate.mjs", evalArgs);
+    try {
+      const ev = JSON.parse(evRun.stdout);
+      staticScore = ev.overallScore;
+      experiential = (ev.axes || []).find((a: { name: string; score: number }) => a.name === "motion")?.score;
+    } catch { /* leave undefined */ }
+  }
+
+  const result = { html: indexHtml, render: fs.existsSync(forgeRender) ? forgeRender : undefined, staticScore, experiential };
+  try { fs.writeFileSync(path.join(forgeDir, "result.json"), JSON.stringify(result, null, 2)); } catch { /* ignore */ }
+
+  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "success", content: `Moving build ready - static ${staticScore ?? "?"}/100, experiential ${experiential ?? "?"}/100` });
+  await client.mutation(api.tasks.appendOutput, {
+    id,
+    title: `Forge - moving build (static ${staticScore ?? "?"} / experiential ${experiential ?? "?"})`,
+    content:
+      "**Compiled the verified spec into a self-contained, animated HTML build (deterministic, no LLM).**\n" +
+      `**Open it (it moves):** \`open "${indexHtml}"\`\n` +
+      (result.render ? `**Render:** ${result.render}\n` : "") +
+      `**Static fidelity:** ${staticScore ?? "?"}/100   **Experiential (motion):** ${experiential ?? "?"}/100\n` +
+      "Forge reproduces the captured motion (keyframes, scroll-reveal, transitions) the static Pencil build cannot.",
+    agent: "Forge",
+  });
 }
 
 // Entry point - only when this file is the directly-invoked script (not when
