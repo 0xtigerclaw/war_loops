@@ -1,4 +1,4 @@
-// War Loops — signal registry. Discovers enabled signals from the config and
+// War Loops - signal registry. Discovers enabled signals from the config and
 // loads each `<name>.mjs` module. Pluggable: a new signal = a file + a config line.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,7 @@ export async function loadSignals(config) {
     try {
       const mod = await import(path.join(__dirname, `${s.name}.mjs`));
       if (typeof mod.score === "function") {
-        loaded.push({ name: s.name, weight: typeof s.weight === "number" ? s.weight : 1, score: mod.score });
+        loaded.push({ name: s.name, weight: typeof s.weight === "number" ? s.weight : 1, score: mod.score, axis: mod.axis || s.axis || null });
       }
     } catch (e) {
       console.error(`[registry] signal "${s.name}" failed to load: ${e.message}`);

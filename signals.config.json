@@ -11,6 +11,7 @@
     { "name": "tokens",     "weight": 0.2,  "enabled": true,  "note": "extracted color/type tokens vs the built .pen (deterministic)" },
     { "name": "structure",  "weight": 0.06, "enabled": true,  "note": "section-count proximity + header/footer bookends (deterministic)" },
     { "name": "content",    "weight": 0.18, "enabled": true,  "note": "required_text present in the build (deterministic)" },
-    { "name": "vision",     "weight": 0.27, "enabled": true,  "note": "claude vision judge: subjective fidelity (LLM), one weighted voice" }
+    { "name": "vision",     "weight": 0.27, "enabled": true,  "note": "claude vision judge: subjective fidelity (LLM), one weighted voice" },
+    { "name": "motion",     "weight": 0,    "enabled": true,  "axis": "experiential", "note": "EXPERIENTIAL axis (reported separately, not blended): how much of the reference's motion the build reproduces" }
   ]
 }

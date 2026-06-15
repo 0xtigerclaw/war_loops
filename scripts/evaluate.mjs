@@ -50,17 +50,24 @@ async function main() {
   for (const sig of signals) {
     try {
       const r = await sig.score(ctx);
-      if (r && typeof r.score === "number") results.push({ name: sig.name, weight: sig.weight, score: r.score, detail: r.detail || "", findings: r.findings || [], usage: r.usage });
+      if (r && typeof r.score === "number") results.push({ name: sig.name, weight: sig.weight, axis: sig.axis || null, score: r.score, detail: r.detail || "", findings: r.findings || [], usage: r.usage });
       else console.error(`[evaluate] signal "${sig.name}" abstained`);
     } catch (e) {
       console.error(`[evaluate] signal "${sig.name}" failed: ${e.message}`);
     }
   }
 
-  if (results.length === 0) { console.error("[evaluate] no signals returned a score"); process.exit(1); }
+  // Static fidelity (the weighted overall) is built ONLY from non-axis signals.
+  // Axis signals (e.g. experiential/motion) are reported separately so they
+  // never muddy the static score - design fidelity and experiential fidelity are
+  // different goals on different scales.
+  const staticResults = results.filter((r) => !r.axis);
+  const axisResults = results.filter((r) => r.axis);
 
-  const totalW = results.reduce((s, r) => s + r.weight, 0) || 1;
-  const overall = Math.round(results.reduce((s, r) => s + r.score * (r.weight / totalW), 0));
+  if (staticResults.length === 0) { console.error("[evaluate] no static signals returned a score"); process.exit(1); }
+
+  const totalW = staticResults.reduce((s, r) => s + r.weight, 0) || 1;
+  const overall = Math.round(staticResults.reduce((s, r) => s + r.score * (r.weight / totalW), 0));
   const findings = results.flatMap((r) => (r.findings || []).map((f) => ({ ...f, signal: r.name })));
   const target = config.targetScore ?? 90;
   const floor = config.iterateFloor ?? 60;
@@ -71,21 +78,25 @@ async function main() {
     return acc;
   }, { inputTokens: 0, outputTokens: 0, costUsd: 0 });
 
-  // Coverage: a good measure names its own gaps. If signals abstained, the
-  // overall is a blend of fewer voices and must not pass as a confident score.
-  const enabled = signals.map((s) => s.name);
-  const scored = new Set(results.map((r) => r.name));
-  const abstained = enabled.filter((n) => !scored.has(n));
-  const coverage = +(scored.size / (enabled.length || 1)).toFixed(2);
+  // Coverage: a good measure names its own gaps. Computed over STATIC signals;
+  // if some abstained, the overall is a blend of fewer voices and must not pass
+  // as a confident score.
+  const enabledStatic = signals.filter((s) => !s.axis).map((s) => s.name);
+  const scored = new Set(staticResults.map((r) => r.name));
+  const abstained = enabledStatic.filter((n) => !scored.has(n));
+  const coverage = +(scored.size / (enabledStatic.length || 1)).toFixed(2);
   const confidence = coverage >= 0.85 ? "ok" : coverage >= 0.6 ? "reduced" : "low";
+
+  const axes = axisResults.map((r) => ({ name: r.name, axis: r.axis, score: r.score, detail: r.detail }));
 
   const out = {
     decision,
     overallScore: overall,
     target,
     confidence,
-    coverage: { scored: scored.size, enabled: enabled.length, abstained },
-    signals: results.map((r) => ({ name: r.name, score: r.score, weight: +(r.weight / totalW).toFixed(3), detail: r.detail })),
+    coverage: { scored: scored.size, enabled: enabledStatic.length, abstained },
+    signals: staticResults.map((r) => ({ name: r.name, score: r.score, weight: +(r.weight / totalW).toFixed(3), detail: r.detail })),
+    axes,
     findings,
     usage,
   };
@@ -98,6 +109,10 @@ async function main() {
     if (confidence !== "ok") console.log(`  ⚠  ${confidence.toUpperCase()} CONFIDENCE: ${abstained.length} signal(s) abstained [${abstained.join(", ")}] - coverage ${coverage}`);
     console.log("");
     for (const r of out.signals) console.log(`  ${r.name.padEnd(12)} ${String(r.score).padStart(3)}  · w ${r.weight}   ${r.detail}`);
+    if (axes.length) {
+      console.log(`\n  Separate axes (not blended into static fidelity):`);
+      for (const a of axes) console.log(`  ${a.name.padEnd(12)} ${String(a.score).padStart(3)}  · ${a.axis}   ${a.detail}`);
+    }
     if (findings.length) {
       console.log(`\n  Findings (${findings.length}):`);
       for (const f of findings) console.log(`    [${f.severity}] ${f.signal}/${f.area}: ${f.observed}\n          → ${f.fix}`);
