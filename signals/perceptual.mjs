@@ -2,6 +2,7 @@
 // the render. Non-LLM, deterministic. Catches layout drift, missing sections,
 // wrong proportions. Both images are normalized to a common size first.
 import { Jimp } from "jimp";
+import fs from "node:fs";
 import * as SSIM from "ssim.js";
 import { clamp } from "./_contract.mjs";
 
@@ -17,7 +18,7 @@ async function load(p) {
 export const name = "perceptual";
 
 export async function score({ referencePath, renderPath }) {
-  if (!referencePath || !renderPath) return null;
+  if (!referencePath || !renderPath || !fs.existsSync(referencePath) || !fs.existsSync(renderPath)) return null;
   const [a, b] = await Promise.all([load(referencePath), load(renderPath)]);
   const { mssim } = ssim(a, b);
   const m = Math.max(0, Math.min(1, mssim));

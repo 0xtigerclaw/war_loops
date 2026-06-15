@@ -4,6 +4,7 @@
 // composition, not brightness) + a coarse COLOR-HISTOGRAM intersection (theme /
 // palette). Catches "this doesn't even look like the same kind of page."
 import { Jimp } from "jimp";
+import fs from "node:fs";
 import { clamp } from "./_contract.mjs";
 
 const N = 32; // thumbnail edge
@@ -42,7 +43,7 @@ function histIntersection(a, b) {
 export const name = "gist";
 
 export async function score({ referencePath, renderPath }) {
-  if (!referencePath || !renderPath) return null;
+  if (!referencePath || !renderPath || !fs.existsSync(referencePath) || !fs.existsSync(renderPath)) return null;
   const [a, b] = await Promise.all([thumb(referencePath), thumb(renderPath)]);
   const corr = correlation(a.gray, b.gray);          // -1..1
   const structMapped = Math.max(0, (corr + 1) / 2);  // 0..1

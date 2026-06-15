@@ -8,6 +8,7 @@
 // full-bleed color blocks butting together. Then we score boundary-count
 // proximity + bidirectional positional alignment.
 import { Jimp } from "jimp";
+import fs from "node:fs";
 import { clamp } from "./_contract.mjs";
 
 const W = 160;   // narrow: average out horizontal detail, keep vertical structure
@@ -81,7 +82,7 @@ function nearestAlign(xs, ys) {
 export const name = "layout";
 
 export async function score({ referencePath, renderPath }) {
-  if (!referencePath || !renderPath) return null;
+  if (!referencePath || !renderPath || !fs.existsSync(referencePath) || !fs.existsSync(renderPath)) return null;
   let A, B;
   try { [A, B] = await Promise.all([profile(referencePath), profile(renderPath)]); }
   catch { return null; }

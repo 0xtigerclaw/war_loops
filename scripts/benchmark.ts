@@ -13,6 +13,7 @@ import { api } from "../../convex/_generated/api";
 import * as dotenv from "dotenv";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 dotenv.config({ path: ".env.local" });
 
@@ -80,4 +81,7 @@ async function main() {
   process.exit(0);
 }
 
-main();
+// Only run the corpus when invoked directly. Importing this module (load-checks,
+// programmatic use) must NOT kick off a full, expensive benchmark.
+const invokedDirectly = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) main();

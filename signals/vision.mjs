@@ -60,7 +60,9 @@ function runClaude(prompt) {
 }
 
 export async function score({ referencePath, renderPath, specPath }) {
-  if (!referencePath || !renderPath) return null;
+  // Abstain (do not ask the judge to score a file that is not there - it could
+  // otherwise hallucinate a verdict for a missing render).
+  if (!referencePath || !renderPath || !fs.existsSync(referencePath) || !fs.existsSync(renderPath)) return null;
   let spec = null;
   if (specPath && fs.existsSync(specPath)) { try { spec = JSON.parse(fs.readFileSync(specPath, "utf-8")); } catch { /* optional */ } }
   const prompt = buildPrompt(referencePath, renderPath, spec);
