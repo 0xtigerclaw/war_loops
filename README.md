@@ -180,6 +180,24 @@ bill** at roughly $1.5 to $2 per build. The cost is the build model, and it is a
 that one step to a cheaper model and the dominant line item drops, at a quality tradeoff you can
 measure on this same benchmark.
 
+## Model routing
+
+Every model the pipeline runs is selectable from one file, `models.config.json`, by
+role: `build` (the Pencil design + repair agent, the dominant cost), `readback`
+(cheap doc read-back), and `judge` (the vision signal). Pencil infers the provider
+from the model id, so the build can run on Claude, OpenAI, or Gemini. Defaults
+reproduce the verified baseline, so an untouched config changes nothing.
+
+```bash
+# one-off swap, no file edit (per-role env override)
+WARLOOPS_BUILD_MODEL=claude-sonnet-4-6 npx tsx scripts/benchmark.ts --only=vercel
+pencil --list-models --agent claude      # valid model ids
+```
+
+Routing the `build` role is the single biggest cost lever. After a swap, re-run the
+benchmark to measure the fidelity/cost tradeoff. Full details in
+[`OVERVIEW.md`](OVERVIEW.md).
+
 ## Capture: beating bot walls
 
 Pixel drives a **genuine browser** so protected sites do not flag it as a bot:
@@ -196,6 +214,7 @@ instead of building from a wall.
 
 ```
 orchestrator.ts                  Pipeline controller (Pixel → Wireframe → Forge)
+models.config.json               Model routing: which model runs each role (build/readback/judge)
 signals.config.json              Control surface: signal toggles, weights, target
 signals/                         Pluggable fidelity signals (layout, perceptual, gist, tokens, structure, content, vision)
 scripts/
@@ -206,6 +225,7 @@ scripts/
   evaluate.mjs                   The weighted signal aggregator
   critic.mjs                     Surgical repair planner
   calibrate.mjs                  Fit signal weights to human ratings (simplex, ridge, LOO)
+  model-router.mjs               Turns models.config.json (+ env) into CLI model flags
   benchmark.ts                   Run the corpus → leaderboard
 calibration/ratings.json         Human fidelity ratings that calibrate the weights
 targets.json                     Benchmark corpus

@@ -1,4 +1,4 @@
-// Signal: vision — the subjective judge, now just one weighted voice in the
+// Signal: vision - the subjective judge, now just one weighted voice in the
 // panel. Spawns `claude` (authenticated, has vision) to compare the reference
 // against the render and return dimensioned sub-scores. Abstains (returns null)
 // if claude is unavailable, so the panel degrades gracefully to the non-LLM
@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { clamp } from "./_contract.mjs";
+import { claudeModelArgs } from "../scripts/model-router.mjs";
 
 export const name = "vision";
 
@@ -49,7 +50,7 @@ function extractVerdict(text) {
 
 function runClaude(prompt) {
   return new Promise((resolve) => {
-    const c = spawn("claude", ["--print", "--output-format", "json", "--dangerously-skip-permissions", "-p", prompt], { env: process.env });
+    const c = spawn("claude", ["--print", "--output-format", "json", ...claudeModelArgs("judge"), "--dangerously-skip-permissions", "-p", prompt], { env: process.env });
     let o = "", e = "";
     c.stdout.on("data", (d) => (o += d.toString()));
     c.stderr.on("data", (d) => (e += d.toString()));

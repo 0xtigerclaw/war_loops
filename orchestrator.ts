@@ -265,7 +265,8 @@ async function ensureBuilt(stdout: string, penPath: string, builtPath: string): 
   if (!built) {
     const rbUsage = path.join(path.dirname(builtPath), "usage", "readback.json");
     fs.mkdirSync(path.dirname(rbUsage), { recursive: true });
-    const rb = await runPencilCli(["--in", penPath, "--out", path.join(path.dirname(builtPath), "_readback.pen"), "--prompt", READBACK_PROMPT, "--agent", "claude", "--usage", rbUsage], 5 * 60 * 1000);
+    const { pencilModelArgs } = await import("./scripts/model-router.mjs");
+    const rb = await runPencilCli(["--in", penPath, "--out", path.join(path.dirname(builtPath), "_readback.pen"), "--prompt", READBACK_PROMPT, ...pencilModelArgs("readback"), "--usage", rbUsage], 5 * 60 * 1000);
     built = extractBuilt(rb.stdout);
     recordCall("readback", readPencilUsage(rbUsage));
   }
@@ -427,7 +428,8 @@ async function runWireframeStage(
     if (isRepair && fs.existsSync(exportPath)) buildArgs.push("-f", exportPath);
     const buildUsage = path.join(specDir, "usage", `build-${iter}.json`);
     fs.mkdirSync(path.dirname(buildUsage), { recursive: true });
-    buildArgs.push("--agent", "claude", "--export", exportPath, "--enable-preview", "--preview-output", previewPath, "--usage", buildUsage);
+    const { pencilModelArgs } = await import("./scripts/model-router.mjs");
+    buildArgs.push(...pencilModelArgs("build"), "--export", exportPath, "--enable-preview", "--preview-output", previewPath, "--usage", buildUsage);
 
     const tBuild = Date.now();
     const run = await runPencilCli(buildArgs, WIREFRAME_TIMEOUT_MS);

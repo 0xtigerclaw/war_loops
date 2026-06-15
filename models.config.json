@@ -1,0 +1,22 @@
+{
+  "_comment": "Model routing for War Loops. ONE control surface for which model runs each role. Swapping a model is an edit here (or a WARLOOPS_<ROLE>_MODEL env var), never a code change. The defaults reproduce the original verified behavior. See OVERVIEW.md > Swapping models. List available Pencil model ids with: pencil --list-models --agent claude",
+  "roles": {
+    "build": {
+      "engine": "pencil",
+      "agent": "claude",
+      "model": "default",
+      "_note": "The Pencil design + repair agent. The dominant cost (about $1.5-$2/build). 'default' uses Pencil's default claude (reproduces the verified baseline). To route: set model to a Pencil model id, e.g. 'claude-opus-4-7', 'claude-sonnet-4-6' (cheaper), 'gpt-5.5', or a gemini id. Provider is inferred from the id. Optional: add \"effort\": \"low|medium|high\" to tune reasoning."
+    },
+    "readback": {
+      "engine": "pencil",
+      "agent": "claude",
+      "model": "default",
+      "_note": "Cheap structured read-back of the built doc (no design work). Safe to route to the cheapest capable model, e.g. 'claude-haiku-4-5'."
+    },
+    "judge": {
+      "engine": "claude",
+      "model": "default",
+      "_note": "The vision fidelity signal (claude CLI). 'default' uses the claude CLI default model. Pin it with an id, e.g. 'claude-opus-4-6' or 'claude-haiku-4-5'."
+    }
+  }
+}
