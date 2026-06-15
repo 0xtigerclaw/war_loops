@@ -33,14 +33,14 @@ export async function runFrontendMirrorPipeline(taskId: string) {
   console.log(`[MIRROR] Starting pipeline for "${task.title}"`);
   await client.mutation(api.tasks.updateStatus, { id, status: "in_progress" });
 
-  // Step 1: Pixel — produce a gated spec (refines until the evaluator passes),
+  // Step 1: Pixel - produce a gated spec (refines until the evaluator passes),
   // then hand it off. Halts the pipeline if the spec can't clear the gate.
   const tPixel = Date.now();
   const handoff = await runPixelStage(client, id, taskId, task.description || "");
   recordStage("pixel", tPixel);
   if (!handoff) return; // failPipeline already invoked
 
-  // Step 2: Wireframe — the agent translates the verified spec into Pencil
+  // Step 2: Wireframe - the agent translates the verified spec into Pencil
   // (active editor), self-checks structurally + visually, and exports a PNG.
   const tWf = Date.now();
   const wireframe = await runWireframeStage(client, id, taskId, handoff);
@@ -48,7 +48,7 @@ export async function runFrontendMirrorPipeline(taskId: string) {
   await writeMetrics(client, id, handoff.specDir);
   if (!wireframe) return; // failPipeline already invoked
 
-  // Step 3: Forge — Build production frontend
+  // Step 3: Forge - Build production frontend
   console.log(`[MIRROR] Forge building production frontend`);
   await client.mutation(api.agents.logActivity, {
     agentName: "Forge",
@@ -113,7 +113,7 @@ async function runPixelStage(
   description: string,
 ): Promise<SpecHandoff | null> {
   const sourceRef = extractSourceRef(description);
-  console.log(`[MIRROR] Pixel analyzing source: ${sourceRef.type} — ${sourceRef.ref}`);
+  console.log(`[MIRROR] Pixel analyzing source: ${sourceRef.type} - ${sourceRef.ref}`);
   await client.mutation(api.agents.logActivity, {
     agentName: "Pixel",
     type: "action",
@@ -145,7 +145,7 @@ async function runPixelStage(
     // may clear), then fail loudly rather than building from a blocked capture.
     if (spec.blocked) {
       await client.mutation(api.agents.logActivity, { agentName: "Pixel", type: "error", content: `Capture blocked (bot wall) on attempt ${attempt}/${maxAttempts}` });
-      if (attempt < maxAttempts) { console.log(`[MIRROR] Capture blocked — retrying`); continue; }
+      if (attempt < maxAttempts) { console.log(`[MIRROR] Capture blocked - retrying`); continue; }
       await failPipeline(client, id, "Pixel", `Source is bot-protected (e.g. Cloudflare) or login-gated: capture returned a challenge page, not the real page. Set WARLOOPS_CDP to attach to your logged-in Chrome, or use image mode (provide a screenshot).`);
       return null;
     }
@@ -168,7 +168,7 @@ async function runPixelStage(
     });
 
     if (evaluation.decision === "pass") break;
-    if (attempt < maxAttempts) console.log(`[MIRROR] Spec ${evaluation.decision} (${evaluation.overallScore}/100) — retrying with more extraction effort`);
+    if (attempt < maxAttempts) console.log(`[MIRROR] Spec ${evaluation.decision} (${evaluation.overallScore}/100) - retrying with more extraction effort`);
   }
 
   const { spec, evaluation } = best!;
@@ -176,9 +176,9 @@ async function runPixelStage(
 
   await client.mutation(api.tasks.appendOutput, {
     id,
-    title: `Pixel Spec — ${evaluation.decision.toUpperCase()} ${evaluation.overallScore}/100`,
+    title: `Pixel Spec - ${evaluation.decision.toUpperCase()} ${evaluation.overallScore}/100`,
     content:
-      `**Source:** ${sourceRef.type} — ${sourceRef.ref}\n` +
+      `**Source:** ${sourceRef.type} - ${sourceRef.ref}\n` +
       `**Spec gate:** ${evaluation.decision} (${evaluation.overallScore}/100)` +
       (failedGates.length ? `\n**Gates needing work:** ${failedGates.join(", ")}` : "") +
       (evaluation.findings.length ? `\n\n**Findings:**\n${evaluation.findings.map((f) => `- [${f.severity}] ${f.category}: ${f.observed} → ${f.repair}`).join("\n")}` : "") +
@@ -189,7 +189,7 @@ async function runPixelStage(
   await client.mutation(api.agents.logActivity, {
     agentName: "Pixel",
     type: evaluation.decision === "fail" ? "error" : "success",
-    content: `Spec ${evaluation.decision} (${evaluation.overallScore}/100) — ${spec.layout?.regions?.length ?? 0} regions, ${spec.content?.required_text?.length ?? 0} text strings`,
+    content: `Spec ${evaluation.decision} (${evaluation.overallScore}/100) - ${spec.layout?.regions?.length ?? 0} regions, ${spec.content?.required_text?.length ?? 0} text strings`,
   });
 
   if (evaluation.decision === "fail") {
@@ -332,7 +332,7 @@ async function writeMetrics(client: ConvexHttpClient, id: Id<"tasks">, specDir: 
   console.log(`[MIRROR] metrics: ${summary}`);
   await client.mutation(api.tasks.appendOutput, {
     id,
-    title: `Run metrics — ${summary}`,
+    title: `Run metrics - ${summary}`,
     content: `**Time:** ${mm}m ${ss}s\n**Tokens:** ${inputTokens.toLocaleString()} in / ${outputTokens.toLocaleString()} out\n**Cost:** $${costUsd.toFixed(2)}\n\n` +
       METRICS.calls.map((c) => `- ${c.call}: $${c.costUsd.toFixed(3)} (${c.inputTokens.toLocaleString()}+${c.outputTokens.toLocaleString()} tok)`).join("\n"),
     agent: "Orchestrator",
@@ -347,7 +347,7 @@ function buildWireframePrompt(spec: DesignSpec, varsJson: string, hasReference: 
   return [
     `Build a HIGH-FIDELITY 1:1 DESKTOP mirror (1440px wide) of the page "${spec.source_ref}".`,
     hasReference
-      ? "An image of the ORIGINAL page is attached. Replicate it as closely as possible: same sections in the same order, same proportions, same colors/typography/spacing, and replicate images/media (use Generate for stock/AI images where the original has photos/graphics — do not leave blank boxes)."
+      ? "An image of the ORIGINAL page is attached. Replicate it as closely as possible: same sections in the same order, same proportions, same colors/typography/spacing, and replicate images/media (use Generate for stock/AI images where the original has photos/graphics - do not leave blank boxes)."
       : "Reproduce the layout, hierarchy, and real content faithfully. Replicate images/media using Generate where the original has photos/graphics.",
     "",
     "USE EXACTLY THESE DESIGN TOKENS (set as document variables, then reference them). Do not guess colors/fonts/sizes:",
@@ -355,13 +355,13 @@ function buildWireframePrompt(spec: DesignSpec, varsJson: string, hasReference: 
     varsJson,
     "```",
     "",
-    `LAYOUT — build these regions as stacked frames, in order: ${regions || "header, hero, content sections, footer"}.`,
+    `LAYOUT - build these regions as stacked frames, in order: ${regions || "header, hero, content sections, footer"}.`,
     "Full-width via fill_container, sized by content. Header = logo + nav; hero = headline + subhead + CTA; sections = title + body/cards; footer = columns + copyright.",
     "",
     "REAL CONTENT (use these exact strings):",
     ...text.map((t) => `- ${t}`),
     "",
-    "One top-level frame. Keep it clean — don't wrap every element in a card. Nothing clipped or overlapping.",
+    "One top-level frame. Keep it clean - don't wrap every element in a card. Nothing clipped or overlapping.",
     ...BUILT_REPORT,
   ].join("\n");
 }
@@ -505,7 +505,7 @@ async function runWireframeStage(
 
   await client.mutation(api.tasks.appendOutput, {
     id,
-    title: `Wireframe — ${result.decision ?? "built"} (${result.score ?? "?"}/100, ${iterations} iter)`,
+    title: `Wireframe - ${result.decision ?? "built"} (${result.score ?? "?"}/100, ${iterations} iter)`,
     content:
       "**Built a real `.pen` mirror via the Pencil CLI, evaluated for 1:1 fidelity.**\n" +
       `**Pencil file:** ${penPath}\n` +
@@ -521,7 +521,7 @@ async function runWireframeStage(
   return result;
 }
 
-// Entry point — only when this file is the directly-invoked script (not when
+// Entry point - only when this file is the directly-invoked script (not when
 // imported, e.g. by the benchmark runner, which would otherwise misread argv).
 const invokedDirectly = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {

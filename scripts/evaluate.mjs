@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// War Loops — fidelity aggregator. Runs the enabled signal panel, blends a
+// War Loops - fidelity aggregator. Runs the enabled signal panel, blends a
 // weighted overall score, and returns a decision. Replaces the single-judge
 // evaluate-wireframe.mjs. Signals + weights live in warloops/signals.config.json.
 //
@@ -94,8 +94,8 @@ async function main() {
     console.log(JSON.stringify(out, null, 2));
   } else {
     const icon = { pass: "✅", iterate: "🔁", fail: "❌" }[decision] || "•";
-    console.log(`\n${icon}  FIDELITY ${decision.toUpperCase()} — ${overall}/100 (target ${target})`);
-    if (confidence !== "ok") console.log(`  ⚠  ${confidence.toUpperCase()} CONFIDENCE: ${abstained.length} signal(s) abstained [${abstained.join(", ")}] — coverage ${coverage}`);
+    console.log(`\n${icon}  FIDELITY ${decision.toUpperCase()} - ${overall}/100 (target ${target})`);
+    if (confidence !== "ok") console.log(`  ⚠  ${confidence.toUpperCase()} CONFIDENCE: ${abstained.length} signal(s) abstained [${abstained.join(", ")}] - coverage ${coverage}`);
     console.log("");
     for (const r of out.signals) console.log(`  ${r.name.padEnd(12)} ${String(r.score).padStart(3)}  · w ${r.weight}   ${r.detail}`);
     if (findings.length) {
