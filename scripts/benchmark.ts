@@ -1,4 +1,4 @@
-// War Loops — benchmark runner. Runs the full pipeline across the target corpus,
+// War Loops - benchmark runner. Runs the full pipeline across the target corpus,
 // records each target's fidelity + per-signal breakdown, and writes a disk report
 // + a sorted leaderboard. This is the MetaLoop: "is the system getting better,
 // on average," and the surface where signal weights get calibrated.
@@ -69,7 +69,7 @@ async function main() {
     "",
     "| # | target | wireframe | forge static | experiential | responsive | status |",
     "|---|--------|-----------|--------------|--------------|------------|--------|",
-    ...sorted.map((r, i) => `| ${i + 1} | ${r.name} | ${r.overall ?? "—"} | ${r.forge?.staticScore ?? "—"} | ${r.forge?.experiential ?? "—"} | ${r.forge?.responsive ?? "—"} | ${r.status} |`),
+    ...sorted.map((r, i) => `| ${i + 1} | ${r.name} | ${r.overall ?? "-"} | ${r.forge?.staticScore ?? "-"} | ${r.forge?.experiential ?? "-"} | ${r.forge?.responsive ?? "-"} | ${r.status} |`),
     "",
     "Per-signal (wireframe):",
     ...sorted.map((r) => `- **${r.name}**: ${Object.entries(r.gates).map(([k, v]) => `${k} ${v.score ?? "?"}`).join(", ")}`),

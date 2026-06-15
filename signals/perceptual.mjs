@@ -1,4 +1,4 @@
-// Signal: perceptual — SSIM (structural similarity) between the reference and
+// Signal: perceptual - SSIM (structural similarity) between the reference and
 // the render. Non-LLM, deterministic. Catches layout drift, missing sections,
 // wrong proportions. Both images are normalized to a common size first.
 import { Jimp } from "jimp";

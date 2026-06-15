@@ -1,4 +1,4 @@
-// Signal: gist — overall resemblance to the reference, the forgiving counterpart
+// Signal: gist - overall resemblance to the reference, the forgiving counterpart
 // to SSIM. Non-LLM, deterministic, zero-dependency (uses jimp, already present).
 // Two parts: low-res structural CORRELATION (mean-centered, so it reads layout/
 // composition, not brightness) + a coarse COLOR-HISTOGRAM intersection (theme /
