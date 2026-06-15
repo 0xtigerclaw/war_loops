@@ -12,6 +12,7 @@
     { "name": "structure",  "weight": 0.06, "enabled": true,  "note": "section-count proximity + header/footer bookends (deterministic)" },
     { "name": "content",    "weight": 0.18, "enabled": true,  "note": "required_text present in the build (deterministic)" },
     { "name": "vision",     "weight": 0.27, "enabled": true,  "note": "claude vision judge: subjective fidelity (LLM), one weighted voice" },
-    { "name": "motion",     "weight": 0,    "enabled": true,  "axis": "experiential", "note": "EXPERIENTIAL axis (reported separately, not blended): how much of the reference's motion the build reproduces" }
+    { "name": "motion",     "weight": 0,    "enabled": true,  "axis": "experiential", "note": "EXPERIENTIAL axis (reported separately, not blended): frame-based motion-match (falls back to a richness proxy)" },
+    { "name": "responsive", "weight": 0,    "enabled": true,  "axis": "responsive", "note": "RESPONSIVE axis (reported separately, not blended): does the build reflow/fit across viewports like the original (abstains for static builds)" }
   ]
 }

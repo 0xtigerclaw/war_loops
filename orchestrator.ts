@@ -701,21 +701,23 @@ async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: 
   if (fs.existsSync(bestPath)) { try { fs.copyFileSync(bestPath, indexHtml); fs.unlinkSync(bestPath); } catch { /* ignore */ } }
   const finalEval = bestEval || lastEval;
   const staticScore = finalEval?.overallScore;
-  const experiential = (finalEval?.axes || []).find((a) => a.name === "motion")?.score;
+  const axisScore = (n: string) => (finalEval?.axes || []).find((a) => a.name === n)?.score;
+  const experiential = axisScore("motion");
+  const responsive = axisScore("responsive");
 
-  const result = { html: indexHtml, render: fs.existsSync(forgeRender) ? forgeRender : undefined, staticScore, experiential, iterations };
+  const result = { html: indexHtml, render: fs.existsSync(forgeRender) ? forgeRender : undefined, staticScore, experiential, responsive, iterations };
   try { fs.writeFileSync(path.join(forgeDir, "result.json"), JSON.stringify(result, null, 2)); } catch { /* ignore */ }
 
-  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "success", content: `Moving build ready - static ${staticScore ?? "?"}/100, experiential ${experiential ?? "?"}/100 (${iterations} iter)` });
+  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "success", content: `Moving build ready - static ${staticScore ?? "?"}/100, experiential ${experiential ?? "?"}/100, responsive ${responsive ?? "?"}/100 (${iterations} iter)` });
   await client.mutation(api.tasks.appendOutput, {
     id,
-    title: `Forge - moving build (static ${staticScore ?? "?"} / experiential ${experiential ?? "?"}, ${iterations} iter)`,
+    title: `Forge - moving build (static ${staticScore ?? "?"} / experiential ${experiential ?? "?"} / responsive ${responsive ?? "?"}, ${iterations} iter)`,
     content:
       "**Reproduced the Pencil wireframe in code and layered on the original's motion (self-contained animated HTML).**\n" +
       `**Open it (it moves):** \`open "${indexHtml}"\`\n` +
       (result.render ? `**Render:** ${result.render}\n` : "") +
-      `**Static fidelity:** ${staticScore ?? "?"}/100   **Experiential (motion):** ${experiential ?? "?"}/100  over ${iterations} iteration(s)\n` +
-      "Forge carries the motion (scroll-reveal, ambient, transitions) the static Pencil build cannot.",
+      `**Static fidelity:** ${staticScore ?? "?"}/100   **Experiential (motion):** ${experiential ?? "?"}/100   **Responsive:** ${responsive ?? "?"}/100  over ${iterations} iteration(s)\n` +
+      "Three axes: desktop design (static), motion (experiential, frame-matched), and cross-viewport reflow (responsive).",
     agent: "Forge",
   });
 }
