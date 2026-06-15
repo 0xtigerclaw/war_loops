@@ -17,6 +17,11 @@
       "engine": "claude",
       "model": "default",
       "_note": "The vision fidelity signal (claude CLI). 'default' uses the claude CLI default model. Pin it with an id, e.g. 'claude-opus-4-6' or 'claude-haiku-4-5'."
+    },
+    "forge": {
+      "engine": "claude",
+      "model": "default",
+      "_note": "The Forge code stage (claude CLI, agentic): reproduces the Pencil wireframe in code and adds the original's motion. 'default' uses the claude CLI default; pin a stronger model for better static fidelity."
     }
   }
 }

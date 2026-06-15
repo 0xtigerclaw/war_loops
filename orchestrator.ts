@@ -207,6 +207,21 @@ function extractSourceRef(description: string): { type: "url" | "image"; ref: st
   return { type: "image", ref: description.trim() };
 }
 
+// Spawn the authenticated `claude` CLI agentically (it can Read images and Write
+// files). Used by Forge to generate code from the Pencil render + motion spec.
+function runClaudeCli(prompt: string, args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn("claude", ["--print", "--output-format", "json", "--dangerously-skip-permissions", ...args, "-p", prompt], { cwd: process.cwd(), env: process.env });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
+    child.on("close", (code) => { clearTimeout(timer); resolve({ code: code ?? 1, stdout, stderr }); });
+    child.on("error", (e) => { clearTimeout(timer); resolve({ code: 1, stdout, stderr: stderr + e.message }); });
+  });
+}
+
 // Spawn the Pencil CLI (`pencil`, authenticated via stored session) and capture
 // its output. The CLI builds a REAL .pen file on disk and a rendered export PNG.
 function runPencilCli(args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -517,23 +532,72 @@ async function runWireframeStage(
   return result;
 }
 
-// Step 3 producer: Forge. Deterministically compile the verified spec into a
-// self-contained, MOVING HTML build (no LLM, no tokens), then render it and score
-// it - the static fidelity of the code build plus the experiential (motion) axis
-// that the static Pencil wireframe scores 0 on. Non-fatal: a Forge failure leaves
-// the Pencil wireframe standing.
+// Forge prompt: reproduce the Pencil wireframe (the verified static BASE) in
+// code, then layer on the motion captured from the original source.
+function buildForgePrompt(spec: DesignSpec, basePath: string, originalPath: string, outPath: string): string {
+  const m = (spec as unknown as { motion?: { summary?: Record<string, unknown>; scroll_reveal?: { mechanism?: string }; keyframes?: Array<{ name: string }> } }).motion || {};
+  const s = m.summary || {};
+  const colors = spec.tokens?.colors || {};
+  const brief: string[] = [];
+  if (s.has_scroll_reveal) brief.push(`- Scroll-reveal: sections fade/slide in as they enter the viewport (IntersectionObserver). In the original: ${m.scroll_reveal?.mechanism || "detected"}.`);
+  if (s.has_infinite) brief.push("- Ambient motion: at least one element loops continuously (e.g. a floating or pulsing hero accent).");
+  if (s.transition_count) brief.push(`- Hover/state transitions on interactive elements (buttons, links, cards): ${s.transition_count} in the original. Add smooth ~150-250ms transitions.`);
+  if ((m.keyframes || []).length) brief.push(`- Animation vocabulary present in the original: ${(m.keyframes || []).slice(0, 12).map((k) => k.name).join(", ")}.`);
+  return [
+    "You are Forge, the production code stage of an autonomous frontend mirror.",
+    "Turn a verified static design into ONE self-contained, responsive, ANIMATED index.html.",
+    "",
+    "BASE DESIGN - reproduce this visually as closely as you can (layout, spacing, colors, type, content):",
+    `  Read this image first with your Read tool: ${basePath}`,
+    "ORIGINAL SOURCE - reference for motion and feel only:",
+    `  Read this image with your Read tool: ${originalPath}`,
+    "",
+    `Design tokens: background ${colors.background || "?"}, text ${colors.text || "?"}, accent ${colors.accent || colors.primary || "?"}.`,
+    "",
+    "ADD THESE MOTIONS/EFFECTS (the point of this stage - the base is static, make it move like the original):",
+    ...(brief.length ? brief : ["- Tasteful entrance + hover micro-interactions consistent with the design."]),
+    "",
+    "REQUIREMENTS:",
+    "- One self-contained file: inline <style> + a small inline <script>. No external deps, no frameworks, no build step.",
+    "- Faithful to the BASE design first; motion is layered on top, never at the cost of the layout.",
+    "- Responsive (sensible at 1440 / 1024 / 390 widths). Respect prefers-reduced-motion.",
+    "- Real, visible motion on load and on scroll/hover.",
+    "",
+    `Use your Write tool to save the finished page to EXACTLY this path: ${outPath}`,
+    "Write only that one file. Do not print the HTML in your reply.",
+  ].join("\n");
+}
+
+// Step 3 producer: Forge. Take the Pencil wireframe (the verified static BASE)
+// and generate a self-contained, MOVING HTML build that reproduces it in code and
+// layers on the motion captured from the original. Then render + score it: the
+// static fidelity of the code build plus the experiential (motion) axis the static
+// Pencil wireframe scores 0 on. Non-fatal: a Forge failure leaves Pencil standing.
 async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: string, handoff: SpecHandoff): Promise<void> {
   const specDir = handoff.specDir;
   const forgeDir = path.join(specDir, "forge");
-  console.log(`[MIRROR] Forge compiling spec -> moving HTML`);
-  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "action", content: "Compiling the verified spec into a moving HTML build (static + motion)" });
-
-  // 1. spec -> moving HTML
-  const forgeRun = await runNode("warloops/scripts/forge.mjs", [handoff.specPath, "--out", forgeDir]);
+  fs.mkdirSync(forgeDir, { recursive: true });
   const indexHtml = path.join(forgeDir, "index.html");
-  if (forgeRun.code !== 0 || !fs.existsSync(indexHtml)) {
-    await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "error", content: `Forge compile failed: ${(forgeRun.stderr || forgeRun.stdout).slice(-300)}` });
-    return;
+  const baseRender = path.join(specDir, "wireframe.png");          // Pencil build = visual base
+  const originalRef = path.join(specDir, "screenshots", "desktop.png"); // original = motion reference
+  console.log(`[MIRROR] Forge reproducing the Pencil wireframe in code + adding the original's motion`);
+  await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "action", content: "Reproducing the Pencil wireframe in code and layering on the original's motion" });
+
+  // 1. LLM codegen from the Pencil base + motion spec; deterministic compiler as fallback.
+  const { claudeModelArgs } = await import("./scripts/model-router.mjs");
+  const tGen = Date.now();
+  const base = fs.existsSync(baseRender) ? baseRender : originalRef;
+  const gen = await runClaudeCli(buildForgePrompt(handoff.spec, base, originalRef, indexHtml), claudeModelArgs("forge"), 10 * 60 * 1000);
+  recordStage("forge.codegen", tGen);
+  try { const env = JSON.parse(gen.stdout); const u = env.usage || {}; recordCall("forge.codegen", { inputTokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), outputTokens: u.output_tokens || 0, costUsd: env.total_cost_usd || 0 }); } catch { /* no usage */ }
+
+  if (!fs.existsSync(indexHtml)) {
+    await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "log", content: "Codegen produced no file; falling back to the deterministic compiler" });
+    const fb = await runNode("warloops/scripts/forge.mjs", [handoff.specPath, "--out", forgeDir]);
+    if (fb.code !== 0 || !fs.existsSync(indexHtml)) {
+      await client.mutation(api.agents.logActivity, { agentName: "Forge", type: "error", content: `Forge failed (codegen + fallback): ${(fb.stderr || fb.stdout).slice(-300)}` });
+      return;
+    }
   }
 
   // 2. render the forge build + capture its own motion (headless; local file, no bot wall).
@@ -546,12 +610,34 @@ async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: 
   const forgeSpec = path.join(recapDir, "spec.json");
   const forgeRender = path.join(recapDir, "screenshots", "desktop.png");
 
+  // Synthesize a built.json from the forge build's OWN captured spec, so the
+  // deterministic content/structure/tokens signals can score it (they read a
+  // built.json; the Pencil stage gets one from the .pen read-back, the HTML build
+  // gets one from its re-capture). Without this they abstain and static looks
+  // unfairly low.
+  let forgeBuilt: string | undefined;
+  try {
+    const rspec = JSON.parse(fs.readFileSync(forgeSpec, "utf-8"));
+    const variables: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(rspec.tokens?.colors || {})) variables[`color_${k}`] = v;
+    let fi = 0;
+    for (const t of Object.values(rspec.tokens?.typography || {})) variables[`type_${fi++}`] = (t as { family?: string }).family || "";
+    const built = {
+      regions: (rspec.layout?.regions || []).map((r: { name?: string; role?: string }) => r.name || r.role).filter(Boolean),
+      texts: rspec.content?.required_text || [],
+      variables,
+    };
+    forgeBuilt = path.join(forgeDir, "built.json");
+    fs.writeFileSync(forgeBuilt, JSON.stringify(built, null, 2));
+  } catch { /* no synthesized built */ }
+
   // 3. score: static fidelity of the forge build + the experiential (motion) axis.
   const refPath = path.join(specDir, "screenshots", "desktop.png");
   let staticScore: number | undefined;
   let experiential: number | undefined;
   if (fs.existsSync(refPath) && fs.existsSync(forgeRender)) {
     const evalArgs = ["--reference", refPath, "--render", forgeRender, "--spec", handoff.specPath, "--json"];
+    if (forgeBuilt && fs.existsSync(forgeBuilt)) evalArgs.push("--built", forgeBuilt);
     if (fs.existsSync(forgeSpec)) evalArgs.push("--build-motion", forgeSpec);
     const evRun = await runNode("warloops/scripts/evaluate.mjs", evalArgs);
     try {
@@ -569,11 +655,11 @@ async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: 
     id,
     title: `Forge - moving build (static ${staticScore ?? "?"} / experiential ${experiential ?? "?"})`,
     content:
-      "**Compiled the verified spec into a self-contained, animated HTML build (deterministic, no LLM).**\n" +
+      "**Reproduced the Pencil wireframe in code and layered on the original's motion (self-contained animated HTML).**\n" +
       `**Open it (it moves):** \`open "${indexHtml}"\`\n` +
       (result.render ? `**Render:** ${result.render}\n` : "") +
       `**Static fidelity:** ${staticScore ?? "?"}/100   **Experiential (motion):** ${experiential ?? "?"}/100\n` +
-      "Forge reproduces the captured motion (keyframes, scroll-reveal, transitions) the static Pencil build cannot.",
+      "Forge carries the motion (scroll-reveal, ambient, transitions) the static Pencil build cannot.",
     agent: "Forge",
   });
 }
