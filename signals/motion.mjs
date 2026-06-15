@@ -47,7 +47,8 @@ export async function score({ specPath, buildMotionPath }) {
 
   let build = richness(null); // static build => no motion
   if (buildMotionPath && fs.existsSync(buildMotionPath)) {
-    try { build = richness(JSON.parse(fs.readFileSync(buildMotionPath, "utf-8"))); } catch { /* keep empty */ }
+    // accepts a spec (uses .motion) or a raw motion object
+    try { const bm = JSON.parse(fs.readFileSync(buildMotionPath, "utf-8")); build = richness(bm.motion || bm); } catch { /* keep empty */ }
   }
 
   const demand = demandOf(ref);

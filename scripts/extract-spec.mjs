@@ -265,7 +265,8 @@ function motionExtract() {
       kfNames.add(rule.name);
       const props = new Set();
       for (const kf of rule.cssRules || []) { const st = kf.style; for (let i = 0; i < (st?.length || 0); i++) props.add(st[i]); }
-      keyframes.push({ name: rule.name, props: [...props].slice(0, 8) });
+      // css = the full rule text, so the animation can be REPRODUCED verbatim, not just named.
+      keyframes.push({ name: rule.name, props: [...props].slice(0, 8), css: (rule.cssText || "").slice(0, 1500) });
     }
   }
 
@@ -284,7 +285,7 @@ function motionExtract() {
         seenA.add(key);
         const iter = first(cs.animationIterationCount);
         if (iter === "infinite") hasInfinite = true;
-        animated.push({ selector: sel(el), name: first(an), duration: first(cs.animationDuration), timing: first(cs.animationTimingFunction), iteration: iter, delay: first(cs.animationDelay) });
+        animated.push({ selector: sel(el), name: first(an), duration: first(cs.animationDuration), timing: first(cs.animationTimingFunction), iteration: iter, delay: first(cs.animationDelay), shorthand: (cs.animation || "").split(",")[0].trim() });
       }
     }
     const tp = cs.transitionProperty;

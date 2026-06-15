@@ -43,6 +43,7 @@ async function main() {
     specPath: args.spec ? path.resolve(args.spec) : undefined,
     penPath: args.pen ? path.resolve(args.pen) : undefined,
     builtPath: args.built ? path.resolve(args.built) : undefined,
+    buildMotionPath: args["build-motion"] ? path.resolve(args["build-motion"]) : undefined,
   };
 
   const signals = await loadSignals(config);
