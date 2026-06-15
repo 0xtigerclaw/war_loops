@@ -95,6 +95,18 @@
           }
         }
       }
+    },
+    "motion": {
+      "type": "object",
+      "description": "Experiential layer captured from the live page: CSS animations, transitions, @keyframes, scroll-reveal, and driving libraries. Optional (URL captures only; empty for image mode). The build does not yet honor motion; it is captured so the experiential dimension is visible and measurable.",
+      "properties": {
+        "libraries": { "type": "array", "items": { "type": "string" } },
+        "keyframes": { "type": "array", "items": { "type": "object" } },
+        "animated": { "type": "array", "items": { "type": "object" } },
+        "transitions": { "type": "array", "items": { "type": "object" } },
+        "scroll_reveal": { "type": "object" },
+        "summary": { "type": "object" }
+      }
     }
   },
   "$defs": {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Frontend Mirror — deterministic spec extractor (Pixel's eyes).
+// Frontend Mirror - deterministic spec extractor (Pixel's eyes).
 //
 // URL mode captures screenshots at 3 viewports and reads REAL computed styles /
 // DOM text. To get past bot walls (Cloudflare etc.) it drives a GENUINE browser:
@@ -231,6 +231,106 @@ function pageExtract() {
   };
 }
 
+// ---- in-page MOTION extraction (runs inside the browser) ------------------
+// The experiential layer the static spec misses: CSS animations, transitions,
+// @keyframes, scroll-reveal, and which animation library drives them. Read
+// deterministically from computed styles + same-origin stylesheets. This makes
+// motion VISIBLE and inspectable in the spec even before the build can honor it
+// (the prerequisite for a motion-match signal and animated code output later).
+function motionExtract() {
+  const vis = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return r.width > 1 && r.height > 1 && cs.visibility !== "hidden" && cs.display !== "none";
+  };
+  const sel = (el) => {
+    if (!el || el.nodeType !== 1) return "";
+    const tag = el.tagName.toLowerCase();
+    if (el.id) return `${tag}#${el.id}`;
+    const cls = (typeof el.className === "string" && el.className.trim()) ? "." + el.className.trim().split(/\s+/)[0] : "";
+    return tag + cls;
+  };
+  const first = (v) => (v || "").split(",")[0].trim();
+
+  // 1. @keyframes inventory (same-origin sheets only; cross-origin .cssRules throws)
+  const keyframes = [];
+  const kfNames = new Set();
+  for (const sheet of document.styleSheets) {
+    let rules;
+    try { rules = sheet.cssRules; } catch { continue; }
+    if (!rules) continue;
+    for (const rule of rules) {
+      const isKf = rule.type === 7 || (rule.constructor && rule.constructor.name === "CSSKeyframesRule");
+      if (!isKf || kfNames.has(rule.name)) continue;
+      kfNames.add(rule.name);
+      const props = new Set();
+      for (const kf of rule.cssRules || []) { const st = kf.style; for (let i = 0; i < (st?.length || 0); i++) props.add(st[i]); }
+      keyframes.push({ name: rule.name, props: [...props].slice(0, 8) });
+    }
+  }
+
+  // 2. animated + transitioned elements
+  const animated = [], transitions = [];
+  let hasInfinite = false;
+  const all = [...document.querySelectorAll("body *")];
+  const seenA = new Set(), seenT = new Set();
+  for (const el of all) {
+    if (!vis(el)) continue;
+    const cs = getComputedStyle(el);
+    const an = cs.animationName;
+    if (an && an !== "none" && animated.length < 50) {
+      const key = sel(el) + "|" + an;
+      if (!seenA.has(key)) {
+        seenA.add(key);
+        const iter = first(cs.animationIterationCount);
+        if (iter === "infinite") hasInfinite = true;
+        animated.push({ selector: sel(el), name: first(an), duration: first(cs.animationDuration), timing: first(cs.animationTimingFunction), iteration: iter, delay: first(cs.animationDelay) });
+      }
+    }
+    const tp = cs.transitionProperty;
+    if (tp && tp !== "none" && (parseFloat(cs.transitionDuration) || 0) > 0 && transitions.length < 60) {
+      const s = sel(el);
+      if (!seenT.has(s)) {
+        seenT.add(s);
+        transitions.push({ selector: s, props: tp.split(",").map((x) => x.trim()).slice(0, 6), duration: first(cs.transitionDuration), timing: first(cs.transitionTimingFunction) });
+      }
+    }
+  }
+
+  // 3. library + scroll-reveal detection
+  const w = window, libs = [];
+  if (w.gsap || w.TweenMax || w.TweenLite) libs.push("gsap");
+  if (w.AOS || document.querySelector("[data-aos]")) libs.push("aos");
+  if (w.Motion || document.querySelector("[data-framer-name], [data-projection-id]")) libs.push("framer-motion");
+  if (w.lottie || document.querySelector("lottie-player, [data-animation-path]")) libs.push("lottie");
+  if (w.ScrollMagic) libs.push("scrollmagic");
+  if (document.querySelector("[data-scroll], [data-scroll-speed]")) libs.push("locomotive");
+
+  let revealCandidates = 0;
+  for (const el of all) {
+    const cs = getComputedStyle(el);
+    if ((parseFloat(cs.transitionDuration) || 0) > 0 && (parseFloat(cs.opacity) < 0.1 || (cs.transform && cs.transform !== "none"))) {
+      if (++revealCandidates > 200) break;
+    }
+  }
+  const revealMarker = document.querySelector("[data-aos], [data-scroll], [data-animate], [data-sr], .reveal, .fade-in, .animate-on-scroll");
+  const detected = !!revealMarker || libs.some((l) => ["aos", "gsap", "locomotive", "scrollmagic"].includes(l)) || revealCandidates > 3;
+  const scroll_reveal = {
+    detected,
+    mechanism: revealMarker ? "attribute/class marker" : (libs.length ? `library:${libs[0]}` : (revealCandidates > 3 ? "inferred (hidden + transition)" : "none")),
+    candidates: revealCandidates,
+  };
+
+  return {
+    libraries: [...new Set(libs)],
+    keyframes: keyframes.slice(0, 30),
+    animated,
+    transitions,
+    scroll_reveal,
+    summary: { animated_count: animated.length, transition_count: transitions.length, keyframe_count: keyframes.length, has_infinite: hasInfinite, has_scroll_reveal: detected },
+  };
+}
+
 // Acquire a browser context. Default = genuine Chrome with a persistent profile
 // (passes bot walls); --cdp attaches to a running Chrome; --headless = legacy.
 async function getBrowserContext(opts) {
@@ -293,6 +393,7 @@ async function extractUrl(url, outDir, name, opts = {}) {
   fs.mkdirSync(path.join(outDir, "screenshots"), { recursive: true });
   const { context, mode, cleanup } = await getBrowserContext(opts);
   let analysis = null;
+  let motion = null;
   let blocked = false;
   const viewports = {};
   try {
@@ -309,6 +410,7 @@ async function extractUrl(url, outDir, name, opts = {}) {
       viewports[key] = { width: vp.width, height: vp.height, screenshot: path.relative(outDir, shotPath) };
       if (key === "desktop") {
         analysis = await page.evaluate(pageExtract);
+        motion = await page.evaluate(motionExtract).catch(() => null);
         const bodyText = await page.evaluate(() => (document.body && document.body.innerText ? document.body.innerText.slice(0, 500) : "")).catch(() => "");
         blocked = looksBlocked(analysis.title, bodyText, analysis.layout.regions.length);
       }
@@ -330,6 +432,7 @@ async function extractUrl(url, outDir, name, opts = {}) {
     tokens: analysis.tokens,
     content: analysis.content,
     interactions: analysis.interactions,
+    motion: motion || { libraries: [], keyframes: [], animated: [], transitions: [], scroll_reveal: { detected: false, mechanism: "none", candidates: 0 }, summary: { animated_count: 0, transition_count: 0, keyframe_count: 0, has_infinite: false, has_scroll_reveal: false } },
   };
 }
 
@@ -383,9 +486,11 @@ async function main() {
   if (spec.source_type === "url") {
     console.log(`[extract-spec] mode=${spec.extractor} screenshots: ${path.join(outDir, "screenshots")} (desktop/tablet/mobile)`);
     console.log(`[extract-spec] colors=${JSON.stringify(spec.tokens.colors)} regions=${spec.layout.regions.length} text=${spec.content.required_text.length} blocked=${spec.blocked}`);
+    const m = spec.motion?.summary || {};
+    console.log(`[extract-spec] motion: ${m.animated_count || 0} animated, ${m.transition_count || 0} transitions, ${m.keyframe_count || 0} keyframes${m.has_infinite ? ", has-infinite" : ""}${m.has_scroll_reveal ? ", scroll-reveal" : ""}${spec.motion?.libraries?.length ? ", libs=[" + spec.motion.libraries.join(",") + "]" : ""}`);
     if (spec.blocked) console.error(`[extract-spec] ⚠️  BLOCKED: landed on a bot-wall / challenge page. Try --cdp <runningChromeUrl>, re-run (profile may clear on retry), or use image mode.`);
   } else {
-    console.log(`[extract-spec] template only — fill via vision, then evaluate.`);
+    console.log(`[extract-spec] template only - fill via vision, then evaluate.`);
   }
   console.log(specPath);
 }
