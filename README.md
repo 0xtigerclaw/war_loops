@@ -191,24 +191,30 @@ rather than overwriting the live config.
 node scripts/calibrate.mjs --report benchmark/report.json --ratings calibration/ratings.json
 ```
 
-### First run (real, measured)
+### First run (real, measured, three axes)
 
-All three captured cleanly (no bot-wall). Cost is self-reported by the tools, not estimated. Full
-breakdown in [`docs/benchmark-run.md`](docs/benchmark-run.md). These numbers reflect the six-signal
-panel; the `layout` signal and recalibrated weights land in the next corpus run.
+A full live run of the complete pipeline on `linear`: Pixel to Pencil Wireframe to Forge (3 repair
+iterations). Every number is measured by the tools, not estimated. Full breakdown in
+[`docs/benchmark-run.md`](docs/benchmark-run.md).
 
-| target | fidelity | total cost | of which build | wall time |
-|--------|----------|------------|----------------|-----------|
-| vercel | 72 / 100 | ≈$5.2 | $4.34 | ≈17 min |
-| linear | 72 / 100 | ≈$3.0 | $2.10 | ≈12 min |
-| tailwind | 70 / 100 | ≈$6.3 | $5.51 | ≈26 min |
+| build | static | experiential | responsive |
+|-------|--------|--------------|------------|
+| Wireframe (Pencil static mirror) | 68 | n/a | n/a |
+| Forge (code, moving) | 69 | 66 | 83 |
 
-Mean fidelity **71 / 100**, in a tight band, and the score held steady when the vision judge drifted
-≈10 points (the grounding working). **Where the money goes:** the five deterministic signals cost
-**$0**, the vision judge is **≈$0.27 per eval**, and the **Pencil build agent (opus-4-6) is the whole
-bill** at roughly $1.5 to $2 per build. The cost is the build model, and it is a routing dial: send
-that one step to a cheaper model and the dominant line item drops, at a quality tradeoff you can
-measure on this same benchmark.
+The Forge code build matches the Pencil mirror on desktop design (69 vs 68) while adding what a static
+file cannot: it moves (experiential 66, a frame-based motion-match) and reflows (responsive 83). The
+experiential number is the honest one: a count-based proxy reads ≈87 on builds like this; the frame
+match reports what actually reproduces.
+
+**Cost: the run was $6.62 / 27 min**, splitting cleanly between the two LLM build stages, Pencil
+Wireframe ≈$3.5 (2 build iterations) and Forge ≈$3.1 (3 codegen iterations). Everything else is **$0**:
+capture, motion capture, renders, the six deterministic static signals, the motion-match, and
+responsiveness. Both build stages are routable model dials (`models.config.json`); send either to a
+cheaper model and that line item drops, at a quality tradeoff you can measure on this same benchmark.
+
+Broader static fidelity across `tailwind / vercel / linear` runs a mean of ≈74/100 (seven-signal
+panel; a few points of run-to-run variance on the build model).
 
 ## Model routing
 
