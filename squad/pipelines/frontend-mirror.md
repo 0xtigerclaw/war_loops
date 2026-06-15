@@ -66,7 +66,7 @@ Evaluates wireframe against design spec using subset of gates:
 - Converts verified wireframe into production frontend code
 - Uses design tokens from Pencil for Tailwind config
 - Implements all viewport breakpoints
-- One-shot build — wireframe is pre-verified
+- One-shot build - wireframe is pre-verified
 
 **Handoff Condition**: Code builds without errors
 
@@ -145,7 +145,7 @@ Standard Tigerclaw synthesis pass (same as other pipelines).
 | Max wireframe iterations | 5 |
 | Pass threshold | All applicable gates pass + overall score >= 75 |
 | Stagnation detection | Score improves < 5 points for 2 consecutive iterations |
-| Stagnation action | `fail` — stop pipeline |
+| Stagnation action | `fail` - stop pipeline |
 | Regression detection | New P1 finding appears after repair |
 | Regression action | Prioritize regression fix before continuing polish |
 

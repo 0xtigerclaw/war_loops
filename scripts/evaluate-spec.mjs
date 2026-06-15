@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Frontend Mirror — spec evaluator (quality gate for Pixel's output).
+// Frontend Mirror - spec evaluator (quality gate for Pixel's output).
 //
 // Takes an extracted DesignSpec and decides whether it is good enough to hand
 // to the wireframe/build stages. Runs deterministic gates (schema validity,
@@ -18,7 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const HEX_RE = /^~?#[0-9a-fA-F]{6}$/;
 const SIZE_RE = /\d/;
-// Values that mean "the extractor/model left a blank" — these must never survive.
+// Values that mean "the extractor/model left a blank" - these must never survive.
 const PLACEHOLDER_RE = /(^|[^a-z])(\.\.\.|#\.\.\.|<url|<image|base64 or path|headline|cta_label|nav items|table values|prices)([^a-z]|$)/i;
 
 // ---- minimal JSON-Schema-subset validator (type/required/properties/items/enum/minItems/minLength) ----
@@ -65,7 +65,7 @@ function evaluate(spec, schema) {
   const findings = [];
   const add = (severity, category, observed, repair) => findings.push({ severity, category, observed, repair });
 
-  // G1 — schema validity (critical)
+  // G1 - schema validity (critical)
   const schemaErrors = [];
   validateSchema(spec, schema, "spec", schemaErrors);
   if (schemaErrors.length === 0) gates.push(gate("schema_valid", "pass", 100, "Matches DesignSpec schema"));
@@ -74,14 +74,14 @@ function evaluate(spec, schema) {
     schemaErrors.slice(0, 8).forEach((e) => add("P0", "schema", e, "Fix field type/presence to match spec.schema.json"));
   }
 
-  // G2 — viewport coverage
+  // G2 - viewport coverage
   const vps = spec.viewports || {};
   const haveShots = ["desktop", "tablet", "mobile"].filter((k) => vps[k] && vps[k].screenshot);
   const vpScore = Math.round((haveShots.length / 3) * 100);
   gates.push(gate("viewports_complete", vpScore === 100 ? "pass" : vpScore >= 34 ? "fail" : "fail", vpScore, `${haveShots.length}/3 viewports have screenshots`));
   if (haveShots.length < 3) add(haveShots.length === 0 ? "P0" : "P1", "viewports", `Missing screenshots for: ${["desktop","tablet","mobile"].filter((k)=>!haveShots.includes(k)).join(", ")}`, "Re-run extraction to capture all 3 viewports");
 
-  // G3 — token completeness (critical)
+  // G3 - token completeness (critical)
   const colors = spec.tokens?.colors || {};
   const realHex = Object.values(colors).filter((c) => HEX_RE.test(String(c)));
   const typo = spec.tokens?.typography || {};
@@ -96,20 +96,20 @@ function evaluate(spec, schema) {
   if (realHex.length < 3) add("P0", "tokens", `Only ${realHex.length} valid hex colors`, "Extract real colors (background, text, accent) as #rrggbb");
   if (typoWithSize.length < 2) add("P1", "tokens", `Only ${typoWithSize.length} typography styles with sizes`, "Capture h1/body type sizes at minimum");
 
-  // G4 — layout definition
+  // G4 - layout definition
   const regions = spec.layout?.regions || [];
   const namedRegions = regions.filter((r) => r.name && r.role);
   const layoutScore = Math.round(Math.min(namedRegions.length, 3) / 3 * 70 + (spec.layout?.hierarchy ? 30 : 0));
   gates.push(gate("layout_defined", layoutScore >= 80 ? "pass" : "fail", layoutScore, `${namedRegions.length} named regions, hierarchy ${spec.layout?.hierarchy ? "present" : "missing"}`));
   if (namedRegions.length < 3) add("P1", "layout", `Only ${namedRegions.length} regions with name+role`, "Identify at least header/main/footer regions");
 
-  // G5 — content capture
+  // G5 - content capture
   const reqText = (spec.content?.required_text || []).filter((t) => t && t.trim());
   const contentScore = Math.round(Math.min(reqText.length, 3) / 3 * 100);
   gates.push(gate("content_captured", contentScore >= 100 ? "pass" : "fail", contentScore, `${reqText.length} required_text entries`));
   if (reqText.length < 3) add("P1", "content", `Only ${reqText.length} text strings captured`, "Capture headings, nav, and CTA labels");
 
-  // G6 — no placeholders (critical)
+  // G6 - no placeholders (critical)
   const placeholders = findPlaceholders(spec);
   gates.push(gate("no_placeholders", placeholders.length === 0 ? "pass" : "fail", placeholders.length === 0 ? 100 : 0, `${placeholders.length} placeholder value(s)`));
   placeholders.slice(0, 8).forEach((p) => add("P0", "placeholder", p, "Replace placeholder with a real extracted value"));
@@ -143,7 +143,7 @@ function main() {
   if (asJson) { console.log(JSON.stringify(result, null, 2)); }
   else {
     const icon = { pass: "✅", iterate: "🔁", fail: "❌" }[result.decision];
-    console.log(`\n${icon}  SPEC ${result.decision.toUpperCase()} — score ${result.overallScore}/100  (${path.basename(specPath)})\n`);
+    console.log(`\n${icon}  SPEC ${result.decision.toUpperCase()} - score ${result.overallScore}/100  (${path.basename(specPath)})\n`);
     for (const g of result.gates) {
       const gi = { pass: "✓", fail: "✗" }[g.status] || "•";
       console.log(`  ${gi} ${g.gate.padEnd(20)} ${String(g.score).padStart(3)}  ${g.detail}`);

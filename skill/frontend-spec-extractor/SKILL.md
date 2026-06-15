@@ -12,7 +12,7 @@ Produces the **DesignSpec** that the frontend-mirror pipeline (Pixel → Wirefra
 - **URL sources** → headless Chromium reads *real* `getComputedStyle` values, DOM text, and layout geometry at 3 viewports (1440 / 1024 / 390) and captures full-page screenshots. No hallucinated tokens.
 - **Image sources** → emits a spec template + a copy of the image for the model to fill via vision (estimated values prefixed with `~`).
 
-A separate **evaluator** then scores the spec against deterministic quality gates and returns `pass` / `iterate` / `fail` with actionable findings — so a thin or placeholder-laden spec never reaches the build stage.
+A separate **evaluator** then scores the spec against deterministic quality gates and returns `pass` / `iterate` / `fail` with actionable findings - so a thin or placeholder-laden spec never reaches the build stage.
 
 The schema in `warloops/scripts/spec.schema.json` is the single source of truth, shared with `warloops/orchestrator.ts` (the `DesignSpec` interface) and `squad/pixel.md`.
 
@@ -34,7 +34,7 @@ npm run spec:extract -- --url <url>
 # Extract from an image (emits a template to fill via vision)
 node warloops/scripts/extract-spec.mjs --image <path> [--out <dir>]
 
-# Evaluate a spec — human summary or --json
+# Evaluate a spec - human summary or --json
 node warloops/scripts/evaluate-spec.mjs <out>/spec.json
 npm run spec:evaluate -- <out>/spec.json --json
 ```

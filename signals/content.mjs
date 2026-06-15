@@ -1,4 +1,4 @@
-// Signal: content — did the spec's required text (headings, nav, CTAs) make it
+// Signal: content - did the spec's required text (headings, nav, CTAs) make it
 // into the build? Deterministic, non-LLM. Reads built.json.
 import fs from "node:fs";
 import { clamp } from "./_contract.mjs";

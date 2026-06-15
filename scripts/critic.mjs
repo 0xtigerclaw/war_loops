@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// War Loops — surgical critic. Turns the panel's per-signal scores + merged
+// War Loops - surgical critic. Turns the panel's per-signal scores + merged
 // findings into a tight, prioritized repair plan: focus the 1-3 WEAKEST signals,
 // keep only the most impactful findings, phrase them as precise directives.
-// Replaces "dump every finding and rebuild" with "fix these few, surgically" —
+// Replaces "dump every finding and rebuild" with "fix these few, surgically" -
 // so each repair iteration moves forward instead of churning the whole page.
 //
 // Usage (standalone): node warloops/scripts/critic.mjs <eval.json> [--max-areas N] [--max-findings N]
@@ -56,5 +56,5 @@ if (process.argv[2] && !process.argv[2].startsWith("--")) {
     maxAreas: args["max-areas"] ? +args["max-areas"] : undefined,
     maxFindings: args["max-findings"] ? +args["max-findings"] : undefined,
   });
-  console.log(brief || "[critic] nothing actionable — fidelity is at target.");
+  console.log(brief || "[critic] nothing actionable - fidelity is at target.");
 }

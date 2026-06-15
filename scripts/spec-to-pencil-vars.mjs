@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Frontend Mirror — deterministic token translator (spec → Pencil variables).
+// Frontend Mirror - deterministic token translator (spec → Pencil variables).
 //
 // Maps a DesignSpec's measured tokens (colors, typography, spacing) to a
 // Pencil set_variables payload. This is the deterministic half of the hybrid

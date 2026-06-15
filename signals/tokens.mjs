@@ -1,4 +1,4 @@
-// Signal: tokens — do the design tokens the spec extracted (colors, fonts)
+// Signal: tokens - do the design tokens the spec extracted (colors, fonts)
 // actually appear in the built design's variables? Deterministic, non-LLM.
 // Reads built.json (emitted by the build: { variables, regions, texts }).
 import fs from "node:fs";

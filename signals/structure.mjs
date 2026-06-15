@@ -1,4 +1,4 @@
-// Signal: structure — does the build reproduce the page's structural shape?
+// Signal: structure - does the build reproduce the page's structural shape?
 // Deterministic, non-LLM. Reads built.json.
 //
 // We do NOT name-match regions: the spec's region names are unreliable (generic
