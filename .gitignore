@@ -8,3 +8,4 @@ benchmark/
 # calibration: generated suggestion + personal ratings
 signals.config.suggested.json
 calibration/ratings.json
+calibration/calib-suggested.json

@@ -1,0 +1,10 @@
+{
+  "ratings": {
+    "tailwind": 75,
+    "vercel": 77,
+    "linear": 79,
+    "tw_x_vercel": 6,
+    "vc_x_linear": 6,
+    "ln_x_tailwind": 6
+  }
+}

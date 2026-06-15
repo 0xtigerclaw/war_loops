@@ -1,0 +1,161 @@
+{
+  "ranAt": "manual",
+  "rows": [
+    {
+      "name": "tailwind",
+      "gates": {
+        "perceptual": {
+          "score": 6
+        },
+        "gist": {
+          "score": 50
+        },
+        "layout": {
+          "score": 77
+        },
+        "tokens": {
+          "score": 100
+        },
+        "structure": {
+          "score": 70
+        },
+        "content": {
+          "score": 62
+        },
+        "vision": {
+          "score": 78
+        }
+      }
+    },
+    {
+      "name": "vercel",
+      "gates": {
+        "perceptual": {
+          "score": 41
+        },
+        "gist": {
+          "score": 66
+        },
+        "layout": {
+          "score": 80
+        },
+        "tokens": {
+          "score": 100
+        },
+        "structure": {
+          "score": 82
+        },
+        "content": {
+          "score": 63
+        },
+        "vision": {
+          "score": 75
+        }
+      }
+    },
+    {
+      "name": "linear",
+      "gates": {
+        "perceptual": {
+          "score": 29
+        },
+        "gist": {
+          "score": 68
+        },
+        "layout": {
+          "score": 72
+        },
+        "tokens": {
+          "score": 80
+        },
+        "structure": {
+          "score": 100
+        },
+        "content": {
+          "score": 63
+        },
+        "vision": {
+          "score": 76
+        }
+      }
+    },
+    {
+      "name": "tw_x_vercel",
+      "gates": {
+        "perceptual": {
+          "score": 16
+        },
+        "gist": {
+          "score": 39
+        },
+        "layout": {
+          "score": 77
+        },
+        "tokens": {
+          "score": 100
+        },
+        "structure": {
+          "score": 70
+        },
+        "content": {
+          "score": 62
+        },
+        "vision": {
+          "score": 9
+        }
+      }
+    },
+    {
+      "name": "vc_x_linear",
+      "gates": {
+        "perceptual": {
+          "score": 5
+        },
+        "gist": {
+          "score": 30
+        },
+        "layout": {
+          "score": 76
+        },
+        "tokens": {
+          "score": 100
+        },
+        "structure": {
+          "score": 82
+        },
+        "content": {
+          "score": 63
+        },
+        "vision": {
+          "score": 5
+        }
+      }
+    },
+    {
+      "name": "ln_x_tailwind",
+      "gates": {
+        "perceptual": {
+          "score": 3
+        },
+        "gist": {
+          "score": 26
+        },
+        "layout": {
+          "score": 61
+        },
+        "tokens": {
+          "score": 80
+        },
+        "structure": {
+          "score": 100
+        },
+        "content": {
+          "score": 63
+        },
+        "vision": {
+          "score": 7
+        }
+      }
+    }
+  ]
+}
