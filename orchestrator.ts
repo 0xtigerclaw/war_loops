@@ -627,7 +627,7 @@ async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: 
   let refMotionTL: string | undefined;
   if (handoff.spec.source_type === "url" || /^https?:\/\//.test(handoff.spec.source_ref)) {
     const tRefM = Date.now();
-    await runNode("warloops/scripts/capture-motion.mjs", ["--url", handoff.spec.source_ref, "--out", refMotionDir, ...(process.env.WARLOOPS_CDP ? ["--cdp", process.env.WARLOOPS_CDP] : [])]);
+    await runNode("warloops/scripts/capture-motion.mjs", ["--url", handoff.spec.source_ref, "--out", refMotionDir, "--scroll-reveal", ...(process.env.WARLOOPS_CDP ? ["--cdp", process.env.WARLOOPS_CDP] : [])]);
     recordStage("forge.motion-ref", tRefM);
     if (fs.existsSync(path.join(refMotionDir, "motion-frames.json"))) refMotionTL = path.join(refMotionDir, "motion-frames.json");
   }
@@ -641,7 +641,7 @@ async function runForgeStage(client: ConvexHttpClient, id: Id<"tasks">, taskId: 
     recordStage(`forge.render.${iter}`, tRender);
     if (!fs.existsSync(originalRef) || !fs.existsSync(forgeRender)) return null;
     const tBM = Date.now();
-    await runNode("warloops/scripts/capture-motion.mjs", ["--url", pathToFileURL(indexHtml).href, "--out", buildMotionDir, "--headless"]);
+    await runNode("warloops/scripts/capture-motion.mjs", ["--url", pathToFileURL(indexHtml).href, "--out", buildMotionDir, "--headless", "--scroll-reveal"]);
     recordStage(`forge.motion-build.${iter}`, tBM);
     try {
       const rspec = JSON.parse(fs.readFileSync(forgeSpec, "utf-8"));

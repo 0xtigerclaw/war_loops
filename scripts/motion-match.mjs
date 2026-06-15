@@ -30,22 +30,54 @@ function sumBands(tl) {
   return s;
 }
 
+// "calm match": a near-static reference should be met with a near-static build.
+function calmMatch(rTot, bTot, floor) {
+  return bTot < floor ? 100 : Math.max(0, Math.round(100 * (1 - Math.min(1, (bTot - rTot) / 0.02))));
+}
+
 // Compare two parsed timeline objects (from capture-motion's motion-frames.json).
+// Two components: entrance/ambient (held at top) and, when both captured it,
+// scroll-reveal. Blended by where the REFERENCE's motion actually lives.
 export function compareMotion(ref, build) {
+  const SR_FLOOR = 0.003;
+  // --- entrance / ambient ---
   const R = ref.energy || [], B = build.energy || [];
-  const rTot = ref.totalEnergy || 0, bTot = build.totalEnergy || 0;
-  if (rTot < MOTION_FLOOR) {
-    // Reference barely moves: a faithful build should also be calm. Reward calm,
-    // penalize a build that invents motion the original does not have.
-    const score = bTot < MOTION_FLOOR ? 100 : Math.max(0, Math.round(100 * (1 - Math.min(1, (bTot - rTot) / 0.02))));
-    return { score, detail: `reference near-static (${rTot.toFixed(4)}); build ${bTot.toFixed(4)}`, parts: { mag: null, temporal: null, spatial: null } };
+  const rE = ref.totalEnergy || 0, bE = build.totalEnergy || 0;
+  let eScore, eParts = { mag: null, temporal: null, spatial: null };
+  if (rE < MOTION_FLOOR) {
+    eScore = calmMatch(rE, bE, MOTION_FLOOR);
+  } else {
+    const mag = Math.min(rE, bE) / Math.max(rE, bE);
+    const temporal = Math.max(0, pearson(R, B));
+    const spatial = Math.max(0, pearson(sumBands(ref), sumBands(build)));
+    eParts = { mag: +mag.toFixed(2), temporal: +temporal.toFixed(2), spatial: +spatial.toFixed(2) };
+    eScore = Math.round(100 * (0.45 * mag + 0.35 * temporal + 0.20 * spatial));
   }
-  const mag = Math.min(rTot, bTot) / Math.max(rTot, bTot);              // comparable amount of motion
-  const temporal = Math.max(0, pearson(R, B));                          // at the same moments
-  const spatial = Math.max(0, pearson(sumBands(ref), sumBands(build))); // in the same places
-  const parts = { mag: +mag.toFixed(2), temporal: +temporal.toFixed(2), spatial: +spatial.toFixed(2) };
-  const score = Math.round(100 * (0.45 * mag + 0.35 * temporal + 0.20 * spatial));
-  return { score, detail: `mag ${parts.mag} · temporal ${parts.temporal} · spatial ${parts.spatial} (ref ${rTot.toFixed(3)} / build ${bTot.toFixed(3)})`, parts };
+
+  // --- scroll-reveal: only scored when the REFERENCE demonstrably has it (above
+  // floor). A near-zero capture (reveal too fast for screenshots, or the page has
+  // little scroll motion) is ignored rather than polluting the score. ---
+  let srScore = null, rSR = ref.scrollReveal?.total || 0, bSR = build.scrollReveal?.total || 0;
+  const srParts = { srMag: null, srTemporal: null };
+  if (ref.scrollReveal && build.scrollReveal && rSR >= SR_FLOOR) {
+    const srMag = Math.min(rSR, bSR) / Math.max(rSR, bSR);
+    const srTemporal = Math.max(0, pearson(ref.scrollReveal.energy || [], build.scrollReveal.energy || []));
+    srParts.srMag = +srMag.toFixed(2); srParts.srTemporal = +srTemporal.toFixed(2);
+    srScore = Math.round(100 * (0.65 * srMag + 0.35 * srTemporal));
+  } else {
+    rSR = 0; // not scored: do not let it into the weighted blend
+  }
+
+  const parts = { ...eParts, ...srParts };
+  if (srScore === null) {
+    const detail = rE < MOTION_FLOOR ? `reference near-static (${rE.toFixed(4)}); build ${bE.toFixed(4)}` : `mag ${eParts.mag} · temporal ${eParts.temporal} · spatial ${eParts.spatial} (entrance/ambient)`;
+    return { score: eScore, detail, parts };
+  }
+  // blend, weighted by where the reference's motion is (entrance vs scroll-reveal)
+  const tot = rE + rSR;
+  const score = tot < MOTION_FLOOR ? Math.round((eScore + srScore) / 2) : Math.round((rE / tot) * eScore + (rSR / tot) * srScore);
+  const detail = `entrance ${eScore} + scroll-reveal ${srScore} -> ${score} (ref e${rE.toFixed(3)}/sr${rSR.toFixed(3)})`;
+  return { score, detail, parts };
 }
 
 export function loadTimeline(p) {

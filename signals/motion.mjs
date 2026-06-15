@@ -53,6 +53,7 @@ export async function score({ specPath, buildMotionPath, refMotionTimeline, buil
       if (r.parts.mag != null && r.parts.mag < 0.6) findings.push({ severity: "P1", area: "motion", observed: `Build moves about ${Math.round(r.parts.mag * 100)}% as much as the original`, fix: "Add the missing entrance/ambient motion" });
       if (r.parts.temporal != null && r.parts.temporal < 0.5) findings.push({ severity: "P1", area: "motion", observed: "Motion happens at different moments than the original (e.g. one-shot entrance vs sustained/ambient)", fix: "Match the original's motion timing, including any continuous/ambient motion" });
       if (r.parts.spatial != null && r.parts.spatial < 0.5) findings.push({ severity: "P2", area: "motion", observed: "Motion is concentrated in different regions than the original", fix: "Animate the same areas the original animates" });
+      if (r.parts.srMag != null && r.parts.srMag < 0.6) findings.push({ severity: "P1", area: "motion", observed: `Build reveals about ${Math.round(r.parts.srMag * 100)}% as much on scroll as the original`, fix: "Add scroll-triggered reveals (IntersectionObserver) so sections animate in as they enter the viewport" });
       return { score: r.score, axis, detail: `frame-match ${r.detail}`, findings };
     } catch { /* fall through to the richness proxy */ }
   }

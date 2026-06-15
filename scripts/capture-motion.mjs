@@ -23,6 +23,9 @@ const url = arg("--url");
 const outDir = path.resolve(arg("--out", "./motion-capture"));
 const FRAMES = parseInt(arg("--frames", "12"), 10);
 const INTERVAL = parseInt(arg("--interval", "200"), 10);
+const SCROLL_REVEAL = has("--scroll-reveal");
+const SR_SETTLE = parseInt(arg("--sr-settle", "900"), 10); // ms for a (CPU-throttled) reveal to play out
+const SR_POSITIONS = [0.15, 0.35, 0.55, 0.78];
 if (!url) { console.error("Usage: capture-motion.mjs --url <url> --out <dir> [--frames N] [--interval ms] [--headless] [--cdp <url>]"); process.exit(64); }
 fs.mkdirSync(path.join(outDir, "frames"), { recursive: true });
 
@@ -43,6 +46,7 @@ async function getContext() {
 async function capture() {
   const { context, cleanup } = await getContext();
   const frames = [];
+  const srPairs = []; // [{ pos, immediate, settled }]
   try {
     const page = await context.newPage();
     await page.setViewportSize(VIEWPORT).catch(() => {});
@@ -56,9 +60,32 @@ async function capture() {
       if (fs.existsSync(p)) frames.push(p);
       if (i < FRAMES - 1) await page.waitForTimeout(INTERVAL);
     }
+    // scroll-reveal: at each position, capture immediately then after a settle. Both
+    // frames are at the SAME scroll offset, so their difference is the reveal
+    // animation itself (content fading/sliding in), with no scroll-translation confound.
+    if (SCROLL_REVEAL) {
+      // Reveals often complete faster than screenshot latency. CPU-throttle the
+      // page so the animation plays slowly enough to catch between immediate and
+      // settled frames at the same scroll offset.
+      let cdp;
+      try { cdp = await page.context().newCDPSession(page); await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 }); } catch { cdp = null; }
+      const max = await page.evaluate(() => Math.max(0, document.documentElement.scrollHeight - window.innerHeight)).catch(() => 0);
+      let i = 0;
+      for (const pos of SR_POSITIONS) {
+        await page.evaluate((y) => window.scrollTo(0, y), Math.round(pos * max)).catch(() => {});
+        const imm = path.join(outDir, "frames", `sr${i}-a.png`);
+        await page.screenshot({ path: imm }).catch(() => {});
+        await page.waitForTimeout(SR_SETTLE);
+        const set = path.join(outDir, "frames", `sr${i}-b.png`);
+        await page.screenshot({ path: set }).catch(() => {});
+        if (fs.existsSync(imm) && fs.existsSync(set)) srPairs.push({ pos, immediate: imm, settled: set });
+        i++;
+      }
+      if (cdp) { try { await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 }); } catch { /* ignore */ } }
+    }
     await page.close();
   } finally { await cleanup(); }
-  return frames;
+  return { frames, srPairs };
 }
 
 // motion-energy timeline: consecutive-frame grayscale diffs, total + per-band
@@ -71,7 +98,14 @@ async function gray(p) {
   return g;
 }
 
-const frames = await capture();
+// mean abs grayscale diff between two frames (0..1)
+function frameDiff(a, b) {
+  let tot = 0;
+  for (let k = 0; k < a.length; k++) tot += Math.abs(a[k] - b[k]);
+  return tot / a.length / 255;
+}
+
+const { frames, srPairs } = await capture();
 const grays = [];
 for (const p of frames) grays.push(await gray(p));
 const energy = [], bandEnergy = [];
@@ -83,7 +117,17 @@ for (let i = 1; i < grays.length; i++) {
   bandEnergy.push(bs.map((v, bi) => v / (bc[bi] || 1) / 255));
 }
 const totalEnergy = +energy.reduce((s, x) => s + x, 0).toFixed(5);
-const out = { url, frames: frames.length, intervalMs: INTERVAL, viewport: VIEWPORT, bands: BANDS, energy, bandEnergy, totalEnergy };
+
+// scroll-reveal timeline: per-position reveal energy (immediate vs settled at the
+// same scroll offset). Captures scroll-triggered reveals the top-hold pass misses.
+let scrollReveal;
+if (srPairs.length) {
+  const srEnergy = [];
+  for (const pr of srPairs) { const a = await gray(pr.immediate), b = await gray(pr.settled); srEnergy.push(+frameDiff(a, b).toFixed(5)); }
+  scrollReveal = { positions: srPairs.map((p) => p.pos), energy: srEnergy, total: +srEnergy.reduce((s, x) => s + x, 0).toFixed(5) };
+}
+
+const out = { url, frames: frames.length, intervalMs: INTERVAL, viewport: VIEWPORT, bands: BANDS, energy, bandEnergy, totalEnergy, scrollReveal };
 fs.writeFileSync(path.join(outDir, "motion-frames.json"), JSON.stringify(out, null, 2));
-console.log(`[capture-motion] ${frames.length} frames, total motion energy ${totalEnergy}  [${energy.map((e) => e.toFixed(3)).join(" ")}]`);
+console.log(`[capture-motion] ${frames.length} frames, entrance/ambient energy ${totalEnergy}${scrollReveal ? `, scroll-reveal energy ${scrollReveal.total} [${scrollReveal.energy.map((e) => e.toFixed(3)).join(" ")}]` : ""}`);
 console.log(path.join(outDir, "motion-frames.json"));
