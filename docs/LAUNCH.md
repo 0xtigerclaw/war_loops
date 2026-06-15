@@ -30,7 +30,7 @@ promise intact.
 ## The four hard blockers, with concrete solutions
 
 ### 1. Economics (the biggest one)
-A full run is ~$6-7 and ~27 min on our own credits. Public traffic = hundreds of runs =
+A full run is about $6-7 and about 27 min on our own credits. Public traffic = hundreds of runs =
 a large bill, fast.
 - **Forge-only** already drops the Pencil build cost (~half the bill).
 - **Model routing** (the dial we built, `models.config.json`): run Forge on a cheaper
